@@ -8,7 +8,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
-import { PrismaService } from '../prisma/prisma.service';
+import { PrismaModule } from '../prisma/prisma.module';
 
 import { ConversationStateService } from './conversation-state.service';
 import { EvolutionApiClientService } from './evolution-api-client.service';
@@ -19,10 +19,9 @@ import { WhatsAppService } from './whatsapp.service';
 import { ZApiClientService } from './zapi-client.service';
 
 @Module({
-  imports: [ConfigModule],
+  imports: [ConfigModule, PrismaModule],
   controllers: [WhatsAppController],
   providers: [
-    PrismaService,
     WhatsAppService,
     ZApiClientService,
     EvolutionApiClientService,

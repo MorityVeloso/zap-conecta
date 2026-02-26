@@ -20,7 +20,6 @@ import {
   HttpStatus,
   Logger,
   UsePipes,
-  Headers,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -32,6 +31,8 @@ import {
 } from '@nestjs/swagger';
 
 import { Public } from '../auth/public.decorator';
+import { CurrentTenant } from '../common/decorators/current-tenant.decorator';
+import type { TenantContext } from '../auth/supabase-jwt.guard';
 
 import {
   EvolutionMessagesUpsertDataSchema,
@@ -69,14 +70,6 @@ export class WhatsAppController {
     private readonly evolutionInstanceService: EvolutionInstanceService,
     private readonly configService: ConfigService,
   ) {}
-
-  /** Resolve tenant slug: header → env fallback */
-  private getTenantSlug(headerSlug?: string): string {
-    return (
-      headerSlug ??
-      this.configService.get<string>('DEFAULT_INSTANCE_SLUG', 'default')
-    );
-  }
 
   // ── Connection ─────────────────────────────────────────────
 
@@ -121,12 +114,9 @@ export class WhatsAppController {
   @ApiOperation({ summary: 'Connect WhatsApp instance (get QR code)' })
   @ApiResponse({ status: 200, description: 'QR code returned for scanning' })
   async connect(
-    @Headers('x-tenant-slug') tenantSlugHeader?: string,
+    @CurrentTenant() tenant: TenantContext,
   ) {
-    const tenantSlug = this.getTenantSlug(tenantSlugHeader);
-
-    // TODO(Fase 2): extrair tenantId do JWT — por ora usa slug como placeholder
-    await this.evolutionInstanceService.getOrCreateInstance(tenantSlug, tenantSlug);
+    await this.evolutionInstanceService.getOrCreateInstance(tenant.tenantSlug, tenant.tenantId);
 
     try {
       const qrData = await this.whatsAppService.getQrCode();
@@ -174,22 +164,18 @@ export class WhatsAppController {
   @ApiOperation({ summary: 'Create WhatsApp instance for tenant' })
   @ApiResponse({ status: 201, description: 'Instance created' })
   async createInstance(
-    @Headers('x-tenant-slug') tenantSlugHeader?: string,
+    @CurrentTenant() tenant: TenantContext,
   ) {
-    const tenantSlug = this.getTenantSlug(tenantSlugHeader);
-    // TODO(Fase 2): extrair tenantId do JWT — por ora usa slug como placeholder
-    return this.evolutionInstanceService.createInstance(tenantSlug, tenantSlug);
+    return this.evolutionInstanceService.createInstance(tenant.tenantSlug, tenant.tenantId);
   }
 
   @Get('instance')
   @ApiOperation({ summary: 'Get WhatsApp instance for tenant' })
   @ApiResponse({ status: 200, description: 'Instance retrieved' })
   async getInstance(
-    @Query('tenantSlug') tenantSlugQuery?: string,
-    @Headers('x-tenant-slug') tenantSlugHeader?: string,
+    @CurrentTenant() tenant: TenantContext,
   ) {
-    const tenantSlug = this.getTenantSlug(tenantSlugQuery ?? tenantSlugHeader);
-    return this.evolutionInstanceService.getInstance(tenantSlug);
+    return this.evolutionInstanceService.getInstance(tenant.tenantSlug);
   }
 
   @Delete('instance')
@@ -197,11 +183,9 @@ export class WhatsAppController {
   @ApiOperation({ summary: 'Delete WhatsApp instance for tenant' })
   @ApiResponse({ status: 204, description: 'Instance deleted' })
   async deleteInstance(
-    @Query('tenantSlug') tenantSlugQuery?: string,
-    @Headers('x-tenant-slug') tenantSlugHeader?: string,
+    @CurrentTenant() tenant: TenantContext,
   ): Promise<void> {
-    const tenantSlug = this.getTenantSlug(tenantSlugQuery ?? tenantSlugHeader);
-    await this.evolutionInstanceService.deleteInstance(tenantSlug);
+    await this.evolutionInstanceService.deleteInstance(tenant.tenantSlug);
   }
 
   @Post('instance/sync-status')
@@ -209,10 +193,9 @@ export class WhatsAppController {
   @ApiOperation({ summary: 'Sync WhatsApp instance connection status' })
   @ApiResponse({ status: 200, description: 'Status synced' })
   async syncInstanceStatus(
-    @Headers('x-tenant-slug') tenantSlugHeader?: string,
+    @CurrentTenant() tenant: TenantContext,
   ) {
-    const tenantSlug = this.getTenantSlug(tenantSlugHeader);
-    const status = await this.evolutionInstanceService.syncStatus(tenantSlug);
+    const status = await this.evolutionInstanceService.syncStatus(tenant.tenantSlug);
     return { status };
   }
 
@@ -318,7 +301,7 @@ export class WhatsAppController {
   async webhookReceive(
     @Body() payload: Record<string, unknown>,
   ): Promise<{ received: boolean }> {
-    const tenantSlug = this.getTenantSlug();
+    const tenantSlug = this.configService.get<string>('DEFAULT_INSTANCE_SLUG', 'default');
 
     if (
       typeof payload.event === 'string' &&
