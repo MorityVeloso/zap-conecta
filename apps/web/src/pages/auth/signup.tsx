@@ -1,11 +1,10 @@
-import React, { useState } from 'react'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { useState } from 'react'
+import { Link } from '@tanstack/react-router'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Zap, Eye, EyeOff, Mail, Lock, Building2, User } from 'lucide-react'
 import { api } from '@/lib/api'
-import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -25,7 +24,6 @@ const signupSchema = z.object({
 type SignupForm = z.infer<typeof signupSchema>
 
 export function SignupPage() {
-  const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)

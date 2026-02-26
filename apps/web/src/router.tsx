@@ -4,6 +4,7 @@ import {
   createRoute,
   createRouter,
   redirect,
+  Outlet,
 } from '@tanstack/react-router'
 import { supabase } from '@/lib/supabase'
 
@@ -18,7 +19,7 @@ import { DashboardPage } from '@/pages/dashboard'
 // ─── Root ─────────────────────────────────────────────────────────────────
 
 const rootRoute = createRootRoute({
-  component: () => <React.Suspense fallback={null}><router.options.context.outlet /></React.Suspense>,
+  component: () => <React.Suspense fallback={null}><Outlet /></React.Suspense>,
 })
 
 // ─── Auth guard helper ────────────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -100,12 +100,9 @@ export function LoginPage() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Senha</Label>
-                  <Link
-                    to="/auth/forgot-password"
-                    className="text-xs text-primary hover:underline"
-                  >
+                  <span className="text-xs text-muted-foreground">
                     Esqueci a senha
-                  </Link>
+                  </span>
                 </div>
                 <Input
                   id="password"
