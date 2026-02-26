@@ -8,6 +8,7 @@ import { CombinedAuthGuard } from './auth/combined-auth.guard';
 import { SupabaseJwtGuard } from './auth/supabase-jwt.guard';
 import { TenantApiKeyGuard } from './auth/tenant-api-key.guard';
 import { TenantsModule } from './tenants/tenants.module';
+import { ApiKeysModule } from './api-keys/api-keys.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 
 @Module({
@@ -18,6 +19,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
     }),
     PrismaModule,
     TenantsModule,
+    ApiKeysModule,
     WhatsAppModule,
   ],
   providers: [

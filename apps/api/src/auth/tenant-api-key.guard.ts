@@ -61,7 +61,7 @@ export class TenantApiKeyGuard implements CanActivate {
       .catch(() => void 0); // ignorar falha silenciosa
 
     const context_: TenantContext = {
-      userId: apiKey.createdById,
+      userId: apiKey.createdById ?? '',
       email: '',
       tenantId: apiKey.tenantId,
       tenantSlug: apiKey.tenant.slug,

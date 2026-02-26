@@ -87,8 +87,8 @@ model ApiKey {
   id          String    @id @default(uuid())
   tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tenantId    String
-  createdBy   Profile   @relation(fields: [createdById], references: [id])
-  createdById String
+  createdBy   Profile?  @relation(fields: [createdById], references: [id])
+  createdById String?
   name        String
   keyHash     String // SHA-256 do valor real (nunca armazenar plain)
   keyPrefix   String // "zc_live_abc123..." primeiros 16 chars (para exibir na UI)
