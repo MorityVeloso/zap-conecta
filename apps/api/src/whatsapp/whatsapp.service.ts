@@ -11,6 +11,7 @@ import {
   Logger,
   BadRequestException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 
 import { ConversationStateService } from './conversation-state.service';
 import type {
@@ -58,6 +59,7 @@ export class WhatsAppService {
     @Inject(WHATSAPP_CLIENT)
     private readonly whatsappClient: WhatsAppClientInterface,
     private readonly conversationState: ConversationStateService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   // ── Connection ─────────────────────────────────────────────
@@ -174,11 +176,13 @@ export class WhatsAppService {
 
   /**
    * Handle incoming message from webhook.
-   * Extension point: emit events here for custom handlers.
+   * Emits 'whatsapp.message.received' for MessagesListener to persist.
    */
   async handleReceivedMessage(
     tenantSlug: string,
     payload: ReceivedMessageWebhook,
+    tenantId?: string,
+    instanceId?: string,
   ): Promise<void> {
     const fromApi = Boolean((payload as Record<string, unknown>).fromApi);
     if (fromApi) return;
@@ -195,7 +199,7 @@ export class WhatsAppService {
     }
 
     const phone = payload.phone.replace('@c.us', '');
-    const content =
+    const textContent =
       payload.text?.message ??
       (payload.image ? '[image]' : null) ??
       (payload.audio ? '[audio]' : null) ??
@@ -204,11 +208,46 @@ export class WhatsAppService {
       '[unknown]';
 
     this.logger.log(
-      `[${tenantSlug}] from=${phone} fromMe=${String(payload.fromMe ?? false)} content=${content}`,
+      `[${tenantSlug}] from=${phone} fromMe=${String(payload.fromMe ?? false)} content=${textContent}`,
     );
 
-    // Extension point: add EventEmitter2 dispatch here for custom handlers
-    // e.g. this.eventEmitter.emit('whatsapp.message.received', { tenantSlug, phone, payload });
+    if (tenantId && instanceId) {
+      const type = payload.image ? 'image'
+        : payload.audio ? 'audio'
+        : payload.video ? 'video'
+        : payload.document ? 'document'
+        : 'text';
+
+      void this.eventEmitter.emitAsync('whatsapp.message.received', {
+        tenantId,
+        instanceId,
+        phone,
+        type,
+        content: { text: textContent },
+      });
+    }
+  }
+
+  /**
+   * Emit a sent-message event so MessagesListener can persist it.
+   * Call after a successful send* response.
+   */
+  emitSent(
+    tenantId: string,
+    instanceId: string,
+    phone: string,
+    type: string,
+    content: Record<string, unknown>,
+    externalId?: string,
+  ): void {
+    void this.eventEmitter.emitAsync('whatsapp.message.sent', {
+      tenantId,
+      instanceId,
+      phone,
+      type,
+      content,
+      externalId,
+    });
   }
 
   handleMessageStatus(payload: MessageStatusWebhook): void {

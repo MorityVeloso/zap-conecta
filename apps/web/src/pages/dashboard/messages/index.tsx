@@ -1,35 +1,17 @@
-import { MessageSquare, Send, Download } from 'lucide-react'
+import { MessageSquare, Send, Download, Loader2 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { formatRelativeTime, formatPhone } from '@/lib/utils'
 
-// Placeholder data — will be replaced with real API in Phase 5
-const mockConversations = [
-  {
-    phone: '5511999990001',
-    name: 'João Silva',
-    lastMessage: 'Obrigado pelo atendimento!',
-    lastAt: new Date(Date.now() - 1000 * 60 * 5),
-    unread: 2,
-    direction: 'inbound' as const,
-  },
-  {
-    phone: '5511999990002',
-    name: 'Maria Santos',
-    lastMessage: 'Seu pedido foi confirmado. ✅',
-    lastAt: new Date(Date.now() - 1000 * 60 * 32),
-    unread: 0,
-    direction: 'outbound' as const,
-  },
-  {
-    phone: '5511999990003',
-    name: '5511999990003',
-    lastMessage: 'Quando chega meu produto?',
-    lastAt: new Date(Date.now() - 1000 * 60 * 60 * 2),
-    unread: 1,
-    direction: 'inbound' as const,
-  },
-]
+interface ConversationSummary {
+  phone: string
+  lastMessage: string
+  lastDirection: 'INBOUND' | 'OUTBOUND'
+  lastAt: string
+  lastStatus: string
+}
 
 function InitialsAvatar({ name }: { name: string }) {
   const initials = name
@@ -47,6 +29,11 @@ function InitialsAvatar({ name }: { name: string }) {
 }
 
 export function MessagesPage() {
+  const { data: conversations = [], isLoading } = useQuery({
+    queryKey: ['messages', 'conversations'],
+    queryFn: () => api.get<ConversationSummary[]>('/messages/conversations'),
+  })
+
   return (
     <div className="p-6 max-w-4xl">
       <div className="flex items-center justify-between mb-6">
@@ -58,68 +45,72 @@ export function MessagesPage() {
         </div>
       </div>
 
-      {/* Coming soon banner */}
-      <div className="mb-6 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-          <MessageSquare className="w-4 h-4 text-primary" />
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
+          <Loader2 className="w-5 h-5 animate-spin" />
+          <span>Carregando...</span>
         </div>
-        <div>
-          <p className="text-sm font-medium text-foreground">
-            Persistência de mensagens em desenvolvimento (Fase 5)
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            As mensagens abaixo são uma prévia do layout. Em breve serão dados reais.
-          </p>
-        </div>
-      </div>
-
-      <Card>
-        <div className="divide-y divide-border">
-          {/* Header */}
-          <div className="px-4 py-2.5 flex items-center justify-between">
-            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-              Conversas recentes
-            </span>
-            <button className="text-xs text-primary hover:underline flex items-center gap-1">
-              <Download className="w-3 h-3" />
-              Exportar
-            </button>
+      ) : conversations.length === 0 ? (
+        <Card className="p-12 flex flex-col items-center text-center">
+          <div className="w-14 h-14 bg-muted rounded-2xl flex items-center justify-center mb-4">
+            <MessageSquare className="w-7 h-7 text-muted-foreground" />
           </div>
-
-          {mockConversations.map((conv) => (
-            <div
-              key={conv.phone}
-              className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/30 transition-colors cursor-pointer"
-            >
-              <InitialsAvatar name={conv.name} />
-
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium text-foreground truncate">{conv.name}</span>
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    {formatRelativeTime(conv.lastAt)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  {conv.direction === 'outbound' && (
-                    <Send className="w-3 h-3 text-muted-foreground shrink-0" />
-                  )}
-                  <p className="text-sm text-muted-foreground truncate">{conv.lastMessage}</p>
-                </div>
-                <p className="text-xs text-muted-foreground/60 mt-0.5">
-                  {formatPhone(conv.phone)}
-                </p>
-              </div>
-
-              {conv.unread > 0 && (
-                <Badge variant="default" className="shrink-0 rounded-full min-w-[20px] h-5 text-xs px-1.5">
-                  {conv.unread}
-                </Badge>
-              )}
+          <h3 className="font-semibold text-foreground">Nenhuma conversa ainda</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+            As conversas aparecerão aqui quando mensagens forem enviadas ou recebidas
+          </p>
+        </Card>
+      ) : (
+        <Card>
+          <div className="divide-y divide-border">
+            <div className="px-4 py-2.5 flex items-center justify-between">
+              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                Conversas recentes · {conversations.length}
+              </span>
+              <button className="text-xs text-primary hover:underline flex items-center gap-1">
+                <Download className="w-3 h-3" />
+                Exportar
+              </button>
             </div>
-          ))}
-        </div>
-      </Card>
+
+            {conversations.map((conv) => (
+              <div
+                key={conv.phone}
+                className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/30 transition-colors cursor-pointer"
+              >
+                <InitialsAvatar name={formatPhone(conv.phone)} />
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground truncate">
+                      {formatPhone(conv.phone)}
+                    </span>
+                    <span className="text-xs text-muted-foreground shrink-0">
+                      {formatRelativeTime(new Date(conv.lastAt))}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    {conv.lastDirection === 'OUTBOUND' && (
+                      <Send className="w-3 h-3 text-muted-foreground shrink-0" />
+                    )}
+                    <p className="text-sm text-muted-foreground truncate">{conv.lastMessage}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground/60 mt-0.5 font-mono text-[10px]">
+                    {conv.phone}
+                  </p>
+                </div>
+
+                <Badge
+                  variant={conv.lastDirection === 'INBOUND' ? 'secondary' : 'outline'}
+                  className="shrink-0 text-[10px]"
+                >
+                  {conv.lastDirection === 'INBOUND' ? 'recebida' : 'enviada'}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
     </div>
   )
 }

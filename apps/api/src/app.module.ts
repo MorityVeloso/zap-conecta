@@ -1,6 +1,7 @@
 import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
+import { EventEmitterModule } from '@nestjs/event-emitter';
 import { TenantContextMiddleware } from './tenants/tenant-context.middleware';
 
 import { PrismaModule } from './prisma/prisma.module';
@@ -9,6 +10,7 @@ import { SupabaseJwtGuard } from './auth/supabase-jwt.guard';
 import { TenantApiKeyGuard } from './auth/tenant-api-key.guard';
 import { TenantsModule } from './tenants/tenants.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
+import { MessagesModule } from './messages/messages.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 
 @Module({
@@ -17,9 +19,11 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
     }),
+    EventEmitterModule.forRoot({ wildcard: false, maxListeners: 20 }),
     PrismaModule,
     TenantsModule,
     ApiKeysModule,
+    MessagesModule,
     WhatsAppModule,
   ],
   providers: [

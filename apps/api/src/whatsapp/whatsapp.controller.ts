@@ -204,56 +204,99 @@ export class WhatsAppController {
   @Post('send/text')
   @ApiOperation({ summary: 'Send a text message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Text message sent' })
-  async sendText(@Body() dto: SendTextMessageDto): Promise<MessageResult> {
-    return this.whatsAppService.sendTextMessage(dto);
+  async sendText(
+    @CurrentTenant() tenant: TenantContext,
+    @Body() dto: SendTextMessageDto,
+  ): Promise<MessageResult> {
+    const result = await this.whatsAppService.sendTextMessage(dto);
+    if (result.success) {
+      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'text', { text: dto.message }, result.messageId);
+    }
+    return result;
   }
 
   @Post('send/button')
   @ApiOperation({ summary: 'Send a button message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Button message sent' })
   async sendButton(
+    @CurrentTenant() tenant: TenantContext,
     @Body() dto: SendButtonMessageDto,
   ): Promise<MessageResult> {
-    return this.whatsAppService.sendButtonMessage(dto);
+    const result = await this.whatsAppService.sendButtonMessage(dto);
+    if (result.success) {
+      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'button', { title: dto.title }, result.messageId);
+    }
+    return result;
   }
 
   @Post('send/list')
   @ApiOperation({ summary: 'Send a list message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'List message sent' })
-  async sendList(@Body() dto: SendListMessageDto): Promise<MessageResult> {
-    return this.whatsAppService.sendListMessage(dto);
+  async sendList(
+    @CurrentTenant() tenant: TenantContext,
+    @Body() dto: SendListMessageDto,
+  ): Promise<MessageResult> {
+    const result = await this.whatsAppService.sendListMessage(dto);
+    if (result.success) {
+      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'list', { title: dto.title }, result.messageId);
+    }
+    return result;
   }
 
   @Post('send/image')
   @ApiOperation({ summary: 'Send an image message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Image message sent' })
-  async sendImage(@Body() dto: SendImageMessageDto): Promise<MessageResult> {
-    return this.whatsAppService.sendImageMessage(dto);
+  async sendImage(
+    @CurrentTenant() tenant: TenantContext,
+    @Body() dto: SendImageMessageDto,
+  ): Promise<MessageResult> {
+    const result = await this.whatsAppService.sendImageMessage(dto);
+    if (result.success) {
+      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'image', { image: dto.image }, result.messageId);
+    }
+    return result;
   }
 
   @Post('send/document')
   @ApiOperation({ summary: 'Send a document message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Document message sent' })
   async sendDocument(
+    @CurrentTenant() tenant: TenantContext,
     @Body() dto: SendDocumentMessageDto,
   ): Promise<MessageResult> {
-    return this.whatsAppService.sendDocumentMessage(dto);
+    const result = await this.whatsAppService.sendDocumentMessage(dto);
+    if (result.success) {
+      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'document', { document: dto.document }, result.messageId);
+    }
+    return result;
   }
 
   @Post('send/pix')
   @ApiOperation({ summary: 'Send a PIX payment message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'PIX message sent' })
-  async sendPix(@Body() dto: SendPixMessageDto): Promise<MessageResult> {
-    return this.whatsAppService.sendPixMessage(dto);
+  async sendPix(
+    @CurrentTenant() tenant: TenantContext,
+    @Body() dto: SendPixMessageDto,
+  ): Promise<MessageResult> {
+    const result = await this.whatsAppService.sendPixMessage(dto);
+    if (result.success) {
+      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'pix', { amount: dto.amount }, result.messageId);
+    }
+    return result;
   }
 
   @Post('send/template')
   @ApiOperation({ summary: 'Send a template message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Template message sent' })
   async sendTemplate(
+    @CurrentTenant() tenant: TenantContext,
     @Body() dto: SendTemplateMessageDto,
   ): Promise<MessageResult> {
-    return this.whatsAppService.sendTemplateMessage(dto);
+    const result = await this.whatsAppService.sendTemplateMessage(dto);
+    if (result.success) {
+      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'template', { templateId: dto.templateId }, result.messageId);
+    }
+    return result;
   }
 
   // ── Webhooks ───────────────────────────────────────────────
