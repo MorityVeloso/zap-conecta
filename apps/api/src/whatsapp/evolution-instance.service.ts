@@ -22,10 +22,12 @@ export enum WhatsAppInstanceStatus {
 
 export interface WhatsAppInstance {
   id: string;
+  tenantId: string;
   tenantSlug: string;
   instanceName: string;
   instanceToken: string | null;
   status: string;
+  phone: string | null;
   webhookUrl: string | null;
   metadata: unknown;
   createdAt: Date;
@@ -106,7 +108,10 @@ export class EvolutionInstanceService {
     return `${this.apiBaseUrl}/whatsapp/webhook/receive/${tenantSlug}`;
   }
 
-  async createInstance(tenantSlug: string): Promise<CreateInstanceResult> {
+  async createInstance(
+    tenantSlug: string,
+    tenantId: string,
+  ): Promise<CreateInstanceResult> {
     const instanceName = this.buildInstanceName(tenantSlug);
     const webhookUrl = this.buildWebhookUrl(tenantSlug);
 
@@ -143,6 +148,7 @@ export class EvolutionInstanceService {
 
     const record = await this.prisma.whatsAppInstance.create({
       data: {
+        tenantId,
         tenantSlug,
         instanceName,
         instanceToken: instanceToken ?? null,
@@ -163,14 +169,17 @@ export class EvolutionInstanceService {
     };
   }
 
-  async getOrCreateInstance(tenantSlug: string): Promise<WhatsAppInstance> {
+  async getOrCreateInstance(
+    tenantSlug: string,
+    tenantId: string,
+  ): Promise<WhatsAppInstance> {
     const existing = await this.prisma.whatsAppInstance.findFirst({
       where: { tenantSlug },
     });
 
     if (existing) return existing as WhatsAppInstance;
 
-    await this.createInstance(tenantSlug);
+    await this.createInstance(tenantSlug, tenantId);
 
     const created = await this.prisma.whatsAppInstance.findFirst({
       where: { tenantSlug },

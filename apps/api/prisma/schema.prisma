@@ -1,0 +1,244 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DATABASE_DIRECT_URL")
+}
+
+// ─── Planos ────────────────────────────────────────────────────────────────
+
+model Plan {
+  id               String   @id @default(uuid())
+  name             String   @unique // 'free' | 'starter' | 'pro' | 'enterprise'
+  displayName      String
+  priceBrlCents    Int      @default(0)
+  messagesPerMonth Int      @default(300)
+  instancesLimit   Int      @default(1)
+  apiKeysLimit     Int      @default(2)
+  features         Json     @default("{}")
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  tenants       Tenant[]
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+// ─── Tenants (organizações) ────────────────────────────────────────────────
+
+model Tenant {
+  id        String       @id @default(uuid())
+  slug      String       @unique
+  name      String
+  plan      Plan         @relation(fields: [planId], references: [id])
+  planId    String
+  status    TenantStatus @default(ACTIVE)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  profiles     Profile[]
+  instances    WhatsAppInstance[]
+  apiKeys      ApiKey[]
+  messages     Message[]
+  webhooks     Webhook[]
+  subscription Subscription?
+  usageRecords UsageRecord[]
+
+  @@map("tenants")
+}
+
+enum TenantStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+}
+
+// ─── Profiles (extensão do Supabase auth.users) ────────────────────────────
+
+model Profile {
+  id        String      @id // = auth.users.id do Supabase
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId  String
+  role      ProfileRole @default(OWNER)
+  fullName  String?
+  avatarUrl String?
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  apiKeys ApiKey[]
+
+  @@map("profiles")
+}
+
+enum ProfileRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+// ─── API Keys ──────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId    String
+  createdBy   Profile   @relation(fields: [createdById], references: [id])
+  createdById String
+  name        String
+  keyHash     String // SHA-256 do valor real (nunca armazenar plain)
+  keyPrefix   String // "zc_live_abc123..." primeiros 16 chars (para exibir na UI)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([keyPrefix]) // busca rápida na validação
+  @@map("api_keys")
+}
+
+// ─── WhatsApp Instances ────────────────────────────────────────────────────
+
+model WhatsAppInstance {
+  id            String                 @id @default(uuid())
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId      String
+  tenantSlug    String                 @unique // mantido para compatibilidade com Evolution API
+  instanceName  String                 @unique
+  instanceToken String?
+  status        WhatsAppInstanceStatus @default(DISCONNECTED)
+  phone         String? // número WhatsApp após conexão
+  webhookUrl    String?
+  metadata      Json?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+
+  messages Message[]
+
+  @@index([tenantId])
+  @@map("whatsapp_instances")
+}
+
+enum WhatsAppInstanceStatus {
+  DISCONNECTED
+  CONNECTING
+  CONNECTED
+  ERROR
+}
+
+// ─── Mensagens ─────────────────────────────────────────────────────────────
+
+model Message {
+  id         String           @id @default(uuid())
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId   String
+  instance   WhatsAppInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  instanceId String
+  phone      String // número do contato
+  direction  Direction
+  type       MessageType
+  content    Json // { text?, imageUrl?, documentUrl?, caption?, ... }
+  status     MessageStatus    @default(PENDING)
+  externalId String? // ID na Evolution API
+  createdAt  DateTime         @default(now())
+
+  @@index([tenantId, phone])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([instanceId])
+  @@map("messages")
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  DOCUMENT
+  AUDIO
+  VIDEO
+  STICKER
+  LOCATION
+  CONTACT
+  BUTTON
+  LIST
+  PIX
+  TEMPLATE
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+// ─── Subscriptions (Asaas) ────────────────────────────────────────────────
+
+model Subscription {
+  id                  String             @id @default(uuid())
+  tenant              Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId            String             @unique
+  plan                Plan               @relation(fields: [planId], references: [id])
+  planId              String
+  asaasSubscriptionId String?
+  asaasCustomerId     String?
+  status              SubscriptionStatus @default(TRIALING)
+  currentPeriodStart  DateTime?
+  currentPeriodEnd    DateTime?
+  trialEndsAt         DateTime?
+  cancelledAt         DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@map("subscriptions")
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  PAUSED
+}
+
+// ─── Uso Mensal (metering) ────────────────────────────────────────────────
+
+model UsageRecord {
+  id               String   @id @default(uuid())
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId         String
+  period           String // '2026-02' (YYYY-MM)
+  messagesSent     Int      @default(0)
+  messagesReceived Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  @@unique([tenantId, period])
+  @@index([tenantId])
+  @@map("usage_records")
+}
+
+// ─── Webhooks customizados ────────────────────────────────────────────────
+
+model Webhook {
+  id        String   @id @default(uuid())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId  String
+  url       String
+  events    String[] // ['message.received', 'message.status']
+  secret    String // HMAC signing secret
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@map("webhooks")
+}

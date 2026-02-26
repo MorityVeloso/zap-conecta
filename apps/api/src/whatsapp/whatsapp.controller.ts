@@ -125,7 +125,8 @@ export class WhatsAppController {
   ) {
     const tenantSlug = this.getTenantSlug(tenantSlugHeader);
 
-    await this.evolutionInstanceService.getOrCreateInstance(tenantSlug);
+    // TODO(Fase 2): extrair tenantId do JWT — por ora usa slug como placeholder
+    await this.evolutionInstanceService.getOrCreateInstance(tenantSlug, tenantSlug);
 
     try {
       const qrData = await this.whatsAppService.getQrCode();
@@ -176,7 +177,8 @@ export class WhatsAppController {
     @Headers('x-tenant-slug') tenantSlugHeader?: string,
   ) {
     const tenantSlug = this.getTenantSlug(tenantSlugHeader);
-    return this.evolutionInstanceService.createInstance(tenantSlug);
+    // TODO(Fase 2): extrair tenantId do JWT — por ora usa slug como placeholder
+    return this.evolutionInstanceService.createInstance(tenantSlug, tenantSlug);
   }
 
   @Get('instance')

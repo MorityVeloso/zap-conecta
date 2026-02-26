@@ -1,5 +1,40 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build outputs
 dist/
+.next/
+build/
+out/
+
+# Environment files
 .env
 .env.local
+.env.*.local
+
+# TypeScript
 *.js.map
+*.tsbuildinfo
+
+# Turbo
+.turbo/
+
+# Supabase
+supabase/.temp/
+
+# Logs
+*.log
+logs/
+firebase-debug.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Test coverage
+coverage/
