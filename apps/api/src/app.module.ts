@@ -11,6 +11,7 @@ import { TenantApiKeyGuard } from './auth/tenant-api-key.guard';
 import { TenantsModule } from './tenants/tenants.module';
 import { ApiKeysModule } from './api-keys/api-keys.module';
 import { MessagesModule } from './messages/messages.module';
+import { BillingModule } from './billing/billing.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 
 @Module({
@@ -24,6 +25,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
     TenantsModule,
     ApiKeysModule,
     MessagesModule,
+    BillingModule,
     WhatsAppModule,
   ],
   providers: [
