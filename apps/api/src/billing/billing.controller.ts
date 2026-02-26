@@ -24,6 +24,7 @@ import {
   type SubscribeDto,
   type AsaasWebhookPayload,
 } from './billing.service';
+import { UsageService } from './usage.service';
 
 @ApiTags('Billing')
 @ApiSecurity('x-api-key')
@@ -33,6 +34,7 @@ export class BillingController {
 
   constructor(
     private readonly billingService: BillingService,
+    private readonly usageService: UsageService,
     private readonly config: ConfigService,
   ) {}
 
@@ -41,6 +43,13 @@ export class BillingController {
   @ApiResponse({ status: 200, description: 'Plans listed' })
   getPlans() {
     return this.billingService.getPlans();
+  }
+
+  @Get('usage')
+  @ApiOperation({ summary: 'Get current month message usage' })
+  @ApiResponse({ status: 200, description: 'Usage retrieved' })
+  getUsage(@CurrentTenant() tenant: TenantContext) {
+    return this.usageService.getUsage(tenant.tenantId);
   }
 
   @Get('subscription')

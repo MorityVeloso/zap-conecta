@@ -9,24 +9,35 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import { PrismaModule } from '../prisma/prisma.module';
+import { BillingModule } from '../billing/billing.module';
 
 import { ConversationStateService } from './conversation-state.service';
 import { EvolutionApiClientService } from './evolution-api-client.service';
 import { EvolutionInstanceService } from './evolution-instance.service';
+import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { WHATSAPP_CLIENT } from './whatsapp-client.interface';
-import { WhatsAppController } from './whatsapp.controller';
+import { WhatsAppConnectionController } from './whatsapp-connection.controller';
+import { WhatsAppInstanceController } from './whatsapp-instance.controller';
+import { WhatsAppSendController } from './whatsapp-send.controller';
+import { WhatsAppWebhookController } from './whatsapp-webhook.controller';
 import { WhatsAppService } from './whatsapp.service';
 import { ZApiClientService } from './zapi-client.service';
 
 @Module({
-  imports: [ConfigModule, PrismaModule],
-  controllers: [WhatsAppController],
+  imports: [ConfigModule, PrismaModule, BillingModule],
+  controllers: [
+    WhatsAppConnectionController,
+    WhatsAppInstanceController,
+    WhatsAppSendController,
+    WhatsAppWebhookController,
+  ],
   providers: [
     WhatsAppService,
     ZApiClientService,
     EvolutionApiClientService,
     EvolutionInstanceService,
     ConversationStateService,
+    WebhookDispatcherService,
     // Feature-flag provider: WHATSAPP_PROVIDER=zapi|evolution (default: evolution)
     {
       provide: WHATSAPP_CLIENT,

@@ -1,8 +1,10 @@
 import { MiddlewareConsumer, Module, NestModule, RequestMethod } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { TenantContextMiddleware } from './tenants/tenant-context.middleware';
+import { HttpLoggingInterceptor } from './common/interceptors/http-logging.interceptor';
 
 import { PrismaModule } from './prisma/prisma.module';
 import { CombinedAuthGuard } from './auth/combined-auth.guard';
@@ -20,6 +22,12 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
       isGlobal: true,
       envFilePath: ['.env.local', '.env'],
     }),
+    // Rate limiting: 200 requests per 60 seconds per IP (in-memory)
+    ThrottlerModule.forRoot([{
+      name: 'global',
+      ttl: 60_000,
+      limit: 200,
+    }]),
     EventEmitterModule.forRoot({ wildcard: false, maxListeners: 20 }),
     PrismaModule,
     TenantsModule,
@@ -34,6 +42,14 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
     {
       provide: APP_GUARD,
       useClass: CombinedAuthGuard,
+    },
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: HttpLoggingInterceptor,
     },
   ],
 })

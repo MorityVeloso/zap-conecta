@@ -1,24 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
+import type { WhatsAppMessageReceivedEvent, WhatsAppMessageSentEvent } from '../whatsapp/whatsapp.events';
 import { MessagesService } from './messages.service';
 
-export interface WhatsAppMessageReceivedEvent {
-  tenantId: string;
-  instanceId: string;
-  phone: string;
-  type: string;
-  content: Record<string, unknown>;
-  externalId?: string;
-}
-
-export interface WhatsAppMessageSentEvent {
-  tenantId: string;
-  instanceId: string;
-  phone: string;
-  type: string;
-  content: Record<string, unknown>;
-  externalId?: string;
-}
+export type { WhatsAppMessageReceivedEvent, WhatsAppMessageSentEvent };
 
 /**
  * Listens to WhatsApp events emitted by WhatsAppService and
