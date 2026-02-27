@@ -1,18 +1,23 @@
 /**
  * WebhookDispatcherService — forwards events to tenant-configured URLs.
  *
- * Signs each request with HMAC-SHA256 in X-Zap-Signature header:
- *   X-Zap-Signature: sha256=<hex>
- *
- * Tenants validate the signature on their side using their webhook secret.
+ * Uses BullMQ for reliable delivery with exponential backoff retry.
+ * Signs each request with HMAC-SHA256 in X-Zap-Signature header.
  */
 import { Injectable, Logger } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { InjectQueue } from '@nestjs/bullmq';
 import { OnEvent } from '@nestjs/event-emitter';
-import type { WhatsAppMessageReceivedEvent, WhatsAppMessageSentEvent } from './whatsapp.events';
+import type { Queue } from 'bullmq';
+import type {
+  WhatsAppMessageReceivedEvent,
+  WhatsAppMessageSentEvent,
+  WhatsAppMessageStatusEvent,
+} from './whatsapp.events';
+import type { WebhookDeliveryJobData } from './webhook-delivery.processor';
+import { QUEUE_WEBHOOK_DELIVERY } from '../queue/queue.constants';
 import { PrismaService } from '@/prisma/prisma.service';
 
-interface WebhookEvent {
+interface WebhookEventPayload {
   event: string;
   tenantId: string;
   data: Record<string, unknown>;
@@ -23,7 +28,10 @@ interface WebhookEvent {
 export class WebhookDispatcherService {
   private readonly logger = new Logger(WebhookDispatcherService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @InjectQueue(QUEUE_WEBHOOK_DELIVERY) private readonly webhookQueue: Queue<WebhookDeliveryJobData>,
+  ) {}
 
   @OnEvent('whatsapp.message.received', { async: true })
   async onMessageReceived(event: WhatsAppMessageReceivedEvent): Promise<void> {
@@ -45,6 +53,15 @@ export class WebhookDispatcherService {
     });
   }
 
+  @OnEvent('whatsapp.message.status', { async: true })
+  async onMessageStatus(event: WhatsAppMessageStatusEvent): Promise<void> {
+    await this.dispatch(event.tenantId, 'message.status', {
+      messageId: event.messageId,
+      status: event.status,
+      phone: event.phone,
+    });
+  }
+
   private async dispatch(
     tenantId: string,
     eventName: string,
@@ -60,7 +77,7 @@ export class WebhookDispatcherService {
 
     if (webhooks.length === 0) return;
 
-    const payload: WebhookEvent = {
+    const payload: WebhookEventPayload = {
       event: eventName,
       tenantId,
       data,
@@ -70,30 +87,22 @@ export class WebhookDispatcherService {
     const body = JSON.stringify(payload);
 
     await Promise.allSettled(
-      webhooks.map((wh) => this.send(wh.url, wh.secret, body)),
+      webhooks.map((wh) =>
+        this.webhookQueue.add(
+          'deliver',
+          { url: wh.url, secret: wh.secret, body },
+          {
+            attempts: 5,
+            backoff: { type: 'exponential', delay: 5000 },
+            removeOnComplete: 100,
+            removeOnFail: 500,
+          },
+        ),
+      ),
     );
-  }
 
-  private async send(url: string, secret: string, body: string): Promise<void> {
-    const signature = `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
-
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Zap-Signature': signature,
-          'User-Agent': 'Zap-Conecta-Webhook/1.0',
-        },
-        body,
-        signal: AbortSignal.timeout(10_000), // 10s timeout
-      });
-
-      if (!res.ok) {
-        this.logger.warn(`Webhook delivery failed: ${url} → ${res.status}`);
-      }
-    } catch (err) {
-      this.logger.warn(`Webhook delivery error: ${url} → ${String(err)}`);
-    }
+    this.logger.debug(
+      `Enqueued ${webhooks.length} webhook delivery job(s) for ${eventName}`,
+    );
   }
 }

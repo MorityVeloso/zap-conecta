@@ -17,3 +17,11 @@ export interface WhatsAppMessageSentEvent {
   content: Record<string, unknown>;
   externalId?: string;
 }
+
+export interface WhatsAppMessageStatusEvent {
+  tenantId: string;
+  instanceId: string;
+  messageId: string;
+  status: string;
+  phone?: string;
+}

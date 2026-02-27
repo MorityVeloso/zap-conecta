@@ -7,26 +7,40 @@
 
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 
 import { PrismaModule } from '../prisma/prisma.module';
 import { BillingModule } from '../billing/billing.module';
+import { QUEUE_WEBHOOK_DELIVERY, QUEUE_BULK_SEND } from '../queue/queue.constants';
 
 import { ConversationStateService } from './conversation-state.service';
 import { EvolutionApiClientService } from './evolution-api-client.service';
 import { EvolutionInstanceService } from './evolution-instance.service';
+import { BulkSendProcessor } from './bulk-send.processor';
+import { WebhookDeliveryProcessor } from './webhook-delivery.processor';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { WHATSAPP_CLIENT } from './whatsapp-client.interface';
 import { WhatsAppConnectionController } from './whatsapp-connection.controller';
 import { WhatsAppInstanceController } from './whatsapp-instance.controller';
+import { WhatsAppChatController } from './whatsapp-chat.controller';
+import { WhatsAppGroupController } from './whatsapp-group.controller';
 import { WhatsAppSendController } from './whatsapp-send.controller';
 import { WhatsAppWebhookController } from './whatsapp-webhook.controller';
 import { WhatsAppService } from './whatsapp.service';
 import { ZApiClientService } from './zapi-client.service';
 
 @Module({
-  imports: [ConfigModule, PrismaModule, BillingModule],
+  imports: [
+    ConfigModule,
+    PrismaModule,
+    BillingModule,
+    BullModule.registerQueue({ name: QUEUE_WEBHOOK_DELIVERY }),
+    BullModule.registerQueue({ name: QUEUE_BULK_SEND }),
+  ],
   controllers: [
+    WhatsAppChatController,
     WhatsAppConnectionController,
+    WhatsAppGroupController,
     WhatsAppInstanceController,
     WhatsAppSendController,
     WhatsAppWebhookController,
@@ -37,6 +51,8 @@ import { ZApiClientService } from './zapi-client.service';
     EvolutionApiClientService,
     EvolutionInstanceService,
     ConversationStateService,
+    BulkSendProcessor,
+    WebhookDeliveryProcessor,
     WebhookDispatcherService,
     // Feature-flag provider: WHATSAPP_PROVIDER=zapi|evolution (default: evolution)
     {

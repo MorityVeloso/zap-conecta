@@ -59,21 +59,21 @@ export class SupabaseJwtGuard implements CanActivate {
     // Busca perfil do usuário (inclui tenantId e role)
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('tenant_id, role, tenants(slug)')
+      .select('tenantId, role, tenants(slug)')
       .eq('id', user.id)
       .single();
 
     if (profileError || !profile) {
-      this.logger.warn(`Profile not found for user ${user.id}`);
+      this.logger.warn(`Profile not found for user ${user.id}: ${profileError?.message}`);
       throw new UnauthorizedException('Perfil de usuário não encontrado');
     }
 
-    const tenantData = (profile.tenants as unknown as { slug: string }[] | null)?.[0] ?? null;
+    const tenantData = (profile.tenants as unknown as { slug: string } | null);
 
     request.tenantContext = {
       userId: user.id,
       email: user.email ?? '',
-      tenantId: profile.tenant_id as string,
+      tenantId: profile.tenantId as string,
       tenantSlug: tenantData?.slug ?? '',
       role: profile.role as string,
     };

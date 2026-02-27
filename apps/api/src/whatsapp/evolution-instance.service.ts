@@ -10,6 +10,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { EvolutionApiException } from '../common/exceptions/evolution-api.exception';
 import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../prisma/prisma.service';
@@ -45,7 +46,7 @@ export class EvolutionInstanceService {
   private readonly logger = new Logger(EvolutionInstanceService.name);
   private readonly evolutionUrl: string;
   private readonly evolutionApiKey: string;
-  private readonly apiBaseUrl: string;
+  private readonly webhookBaseUrl: string;
 
   constructor(
     private readonly configService: ConfigService,
@@ -59,9 +60,10 @@ export class EvolutionInstanceService {
       'EVOLUTION_API_KEY',
       '',
     );
-    this.apiBaseUrl = this.configService.get<string>(
-      'API_BASE_URL',
-      'http://localhost:3000',
+    // URL that Evolution API (inside Docker) uses to reach our NestJS API
+    this.webhookBaseUrl = this.configService.get<string>(
+      'WEBHOOK_BASE_URL',
+      'http://host.docker.internal:3001',
     );
   }
 
@@ -90,9 +92,7 @@ export class EvolutionInstanceService {
       this.logger.error(
         `Evolution API error: ${String(response.status)} - ${errorText}`,
       );
-      throw new Error(
-        `Evolution API request failed: ${String(response.status)}`,
-      );
+      throw new EvolutionApiException(response.status, errorText);
     }
 
     const text = await response.text();
@@ -105,7 +105,14 @@ export class EvolutionInstanceService {
   }
 
   buildWebhookUrl(tenantSlug: string): string {
-    return `${this.apiBaseUrl}/whatsapp/webhook/receive/${tenantSlug}`;
+    return `${this.webhookBaseUrl}/whatsapp/webhook/receive/${tenantSlug}`;
+  }
+
+  async findByTenant(tenantSlug: string): Promise<WhatsAppInstance | null> {
+    const instance = await this.prisma.whatsAppInstance.findFirst({
+      where: { tenantSlug },
+    });
+    return instance as WhatsAppInstance | null;
   }
 
   async createInstance(
@@ -246,6 +253,61 @@ export class EvolutionInstanceService {
     });
 
     this.logger.log(`Webhook configured: ${instanceName} -> ${webhookUrl}`);
+  }
+
+  async getConnectionStatusForInstance(
+    instanceName: string,
+  ): Promise<{ connected: boolean; phone?: string }> {
+    try {
+      const response = await this.makeRequest<{
+        instance: { state: string };
+      }>(`/instance/connectionState/${instanceName}`, 'GET');
+
+      const connected = response.instance?.state === 'open';
+      let phone: string | undefined;
+
+      if (connected) {
+        try {
+          const instances = await this.makeRequest<
+            { name: string; ownerJid?: string; number?: string }[]
+          >('/instance/fetchInstances', 'GET');
+          const inst = instances.find((i) => i.name === instanceName);
+          if (inst?.ownerJid) phone = inst.ownerJid.replace('@s.whatsapp.net', '');
+          else if (inst?.number) phone = inst.number;
+        } catch {
+          // phone lookup failed, not critical
+        }
+      }
+
+      return { connected, phone };
+    } catch {
+      return { connected: false };
+    }
+  }
+
+  async getQrCodeForInstance(
+    instanceName: string,
+  ): Promise<{ qrcode: string; imageBase64?: string }> {
+    const response = await this.makeRequest<{
+      pairingCode?: string;
+      code?: string;
+      base64?: string;
+    }>(`/instance/connect/${instanceName}`, 'GET');
+
+    return {
+      qrcode: response.code ?? response.pairingCode ?? '',
+      imageBase64: response.base64,
+    };
+  }
+
+  async disconnectInstance(instanceName: string): Promise<void> {
+    await this.makeRequest(`/instance/logout/${instanceName}`, 'DELETE');
+    this.logger.log(`Instance disconnected: ${instanceName}`);
+  }
+
+  async restartInstance(instanceName: string): Promise<void> {
+    await this.makeRequest(`/instance/restart/${instanceName}`, 'PUT');
+    this.logger.log(`Instance restarted: ${instanceName}`);
   }
 
   async syncStatus(tenantSlug: string): Promise<WhatsAppInstanceStatus> {

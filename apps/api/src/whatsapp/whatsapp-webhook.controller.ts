@@ -31,6 +31,7 @@ import {
   transformEvolutionMessageStatus,
 } from './evolution-webhook.transformer';
 import { WhatsAppService } from './whatsapp.service';
+import { EvolutionInstanceService } from './evolution-instance.service';
 
 @ApiTags('WhatsApp Webhooks')
 @Controller('whatsapp')
@@ -40,6 +41,7 @@ export class WhatsAppWebhookController {
   constructor(
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
+    private readonly evolutionInstanceService: EvolutionInstanceService,
   ) {}
 
   @Post('webhook/receive/:tenantSlug')
@@ -114,7 +116,14 @@ export class WhatsAppWebhookController {
           this.logger.warn(`Invalid messages.upsert payload: ${parsed.error.message}`);
           return;
         }
-        await this.whatsAppService.handleReceivedMessage(tenantSlug, transformEvolutionMessage(parsed.data));
+        // Resolve tenantId + instanceId so the event is emitted for persistence & webhook dispatch
+        const instance = await this.evolutionInstanceService.findByTenant(tenantSlug);
+        await this.whatsAppService.handleReceivedMessage(
+          tenantSlug,
+          transformEvolutionMessage(parsed.data),
+          instance?.tenantId,
+          instance?.id,
+        );
         break;
       }
 
@@ -124,7 +133,12 @@ export class WhatsAppWebhookController {
           this.logger.warn(`Invalid messages.update payload: ${parsed.error.message}`);
           return;
         }
-        this.whatsAppService.handleMessageStatus(transformEvolutionMessageStatus(parsed.data));
+        const instUpdate = await this.evolutionInstanceService.findByTenant(tenantSlug);
+        this.whatsAppService.handleMessageStatus(
+          transformEvolutionMessageStatus(parsed.data),
+          instUpdate?.tenantId,
+          instUpdate?.id,
+        );
         break;
       }
 

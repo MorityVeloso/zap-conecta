@@ -5,10 +5,11 @@
  * PIX generation inlined (no external PixGeneratorService).
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { EvolutionApiException } from '../common/exceptions/evolution-api.exception';
 
 import type {
   SendTextMessageDto,
@@ -17,6 +18,13 @@ import type {
   SendImageMessageDto,
   SendDocumentMessageDto,
   SendPixMessageDto,
+  SendAudioMessageDto,
+  SendVideoMessageDto,
+  SendStickerMessageDto,
+  SendLocationMessageDto,
+  SendContactMessageDto,
+  SendReactionDto,
+  SendPollDto,
 } from './dto/message.dto';
 import type {
   WhatsAppClientInterface,
@@ -88,9 +96,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
         this.logger.error(
           `Evolution API error: ${String(response.status)} - ${errorText}`,
         );
-        throw new Error(
-          `Evolution API request failed: ${String(response.status)}`,
-        );
+        throw new EvolutionApiException(response.status, errorText);
       }
 
       const text = await response.text();
@@ -151,6 +157,19 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
 
     const codeWithoutCrc = fields.filter(Boolean).join('');
     return codeWithoutCrc + this.calculateCrc16(codeWithoutCrc);
+  }
+
+  private buildQuotedKey(
+    dto: { quoted?: { messageId: string; remoteJid: string; fromMe: boolean } },
+  ): Record<string, unknown> | undefined {
+    if (!dto.quoted) return undefined;
+    return {
+      key: {
+        remoteJid: dto.quoted.remoteJid,
+        fromMe: dto.quoted.fromMe,
+        id: dto.quoted.messageId,
+      },
+    };
   }
 
   // ── WhatsAppClientInterface ────────────────────────────
@@ -224,12 +243,16 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
     const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new Error('No WhatsApp instance');
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const body: Record<string, unknown> = { number: dto.phone, text: dto.message };
+    const quoted = this.buildQuotedKey(dto);
+    if (quoted) body.quoted = quoted;
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendText/${instanceName}`,
       'POST',
-      { number: dto.phone, text: dto.message },
+      body,
     );
 
     this.logger.log(`Text message sent to ${dto.phone}`);
@@ -239,8 +262,9 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
   async sendButtonMessage(
     dto: SendButtonMessageDto,
   ): Promise<WhatsAppClientResponse> {
-    const instanceName = await this.getInstanceName();
-    if (!instanceName) throw new Error('No WhatsApp instance');
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendButtons/${instanceName}`,
@@ -265,8 +289,9 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
   async sendListMessage(
     dto: SendListMessageDto,
   ): Promise<WhatsAppClientResponse> {
-    const instanceName = await this.getInstanceName();
-    if (!instanceName) throw new Error('No WhatsApp instance');
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendList/${instanceName}`,
@@ -295,18 +320,23 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
   async sendImageMessage(
     dto: SendImageMessageDto,
   ): Promise<WhatsAppClientResponse> {
-    const instanceName = await this.getInstanceName();
-    if (!instanceName) throw new Error('No WhatsApp instance');
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const body: Record<string, unknown> = {
+      number: dto.phone,
+      mediatype: 'image',
+      media: dto.image,
+      caption: dto.caption ?? '',
+    };
+    const quoted = this.buildQuotedKey(dto);
+    if (quoted) body.quoted = quoted;
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendMedia/${instanceName}`,
       'POST',
-      {
-        number: dto.phone,
-        mediatype: 'image',
-        media: dto.image,
-        caption: dto.caption ?? '',
-      },
+      body,
     );
 
     this.logger.log(`Image message sent to ${dto.phone}`);
@@ -316,19 +346,24 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
   async sendDocumentMessage(
     dto: SendDocumentMessageDto,
   ): Promise<WhatsAppClientResponse> {
-    const instanceName = await this.getInstanceName();
-    if (!instanceName) throw new Error('No WhatsApp instance');
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const body: Record<string, unknown> = {
+      number: dto.phone,
+      mediatype: 'document',
+      media: dto.document,
+      fileName: dto.fileName,
+      caption: dto.caption ?? '',
+    };
+    const quoted = this.buildQuotedKey(dto);
+    if (quoted) body.quoted = quoted;
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendMedia/${instanceName}`,
       'POST',
-      {
-        number: dto.phone,
-        mediatype: 'document',
-        media: dto.document,
-        fileName: dto.fileName,
-        caption: dto.caption ?? '',
-      },
+      body,
     );
 
     this.logger.log(`Document message sent to ${dto.phone}`);
@@ -344,7 +379,173 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
       ? `${dto.description}\n\nPIX Copia e Cola:\n${pixCode}`
       : `PIX Copia e Cola:\n${pixCode}`;
 
-    return this.sendTextMessage({ phone: dto.phone, message });
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    return this.sendTextMessage({ phone: dto.phone, message, tenantSlug: slug } as SendTextMessageDto);
+  }
+
+  async sendAudioMessage(
+    dto: SendAudioMessageDto,
+  ): Promise<WhatsAppClientResponse> {
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const endpoint = dto.ptt
+      ? `/message/sendWhatsAppAudio/${instanceName}`
+      : `/message/sendMedia/${instanceName}`;
+
+    const body: Record<string, unknown> = dto.ptt
+      ? { number: dto.phone, audio: dto.audio }
+      : { number: dto.phone, mediatype: 'audio', media: dto.audio };
+    const quoted = this.buildQuotedKey(dto);
+    if (quoted) body.quoted = quoted;
+
+    const response = await this.makeRequest<{ key?: { id?: string } }>(
+      endpoint,
+      'POST',
+      body,
+    );
+
+    this.logger.log(`Audio message sent to ${dto.phone}`);
+    return { messageId: response.key?.id };
+  }
+
+  async sendVideoMessage(
+    dto: SendVideoMessageDto,
+  ): Promise<WhatsAppClientResponse> {
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const body: Record<string, unknown> = {
+      number: dto.phone,
+      mediatype: 'video',
+      media: dto.video,
+      caption: dto.caption ?? '',
+    };
+    const quoted = this.buildQuotedKey(dto);
+    if (quoted) body.quoted = quoted;
+
+    const response = await this.makeRequest<{ key?: { id?: string } }>(
+      `/message/sendMedia/${instanceName}`,
+      'POST',
+      body,
+    );
+
+    this.logger.log(`Video message sent to ${dto.phone}`);
+    return { messageId: response.key?.id };
+  }
+
+  async sendStickerMessage(
+    dto: SendStickerMessageDto,
+  ): Promise<WhatsAppClientResponse> {
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const response = await this.makeRequest<{ key?: { id?: string } }>(
+      `/message/sendSticker/${instanceName}`,
+      'POST',
+      { number: dto.phone, sticker: dto.sticker },
+    );
+
+    this.logger.log(`Sticker message sent to ${dto.phone}`);
+    return { messageId: response.key?.id };
+  }
+
+  async sendLocationMessage(
+    dto: SendLocationMessageDto,
+  ): Promise<WhatsAppClientResponse> {
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const response = await this.makeRequest<{ key?: { id?: string } }>(
+      `/message/sendLocation/${instanceName}`,
+      'POST',
+      {
+        number: dto.phone,
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        name: dto.name ?? '',
+        address: dto.address ?? '',
+      },
+    );
+
+    this.logger.log(`Location message sent to ${dto.phone}`);
+    return { messageId: response.key?.id };
+  }
+
+  async sendContactMessage(
+    dto: SendContactMessageDto,
+  ): Promise<WhatsAppClientResponse> {
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const response = await this.makeRequest<{ key?: { id?: string } }>(
+      `/message/sendContact/${instanceName}`,
+      'POST',
+      {
+        number: dto.phone,
+        contact: dto.contacts.map((c) => ({
+          fullName: c.fullName,
+          wuid: `${c.phoneNumber}@s.whatsapp.net`,
+          phoneNumber: c.phoneNumber,
+          organization: c.organization ?? '',
+          email: c.email ?? '',
+        })),
+      },
+    );
+
+    this.logger.log(`Contact message sent to ${dto.phone}`);
+    return { messageId: response.key?.id };
+  }
+
+  async sendReaction(
+    dto: SendReactionDto,
+  ): Promise<WhatsAppClientResponse> {
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const response = await this.makeRequest<{ key?: { id?: string } }>(
+      `/message/sendReaction/${instanceName}`,
+      'POST',
+      {
+        key: {
+          remoteJid: dto.remoteJid,
+          fromMe: dto.fromMe,
+          id: dto.messageId,
+        },
+        reaction: dto.reaction,
+      },
+    );
+
+    this.logger.log(`Reaction sent for message ${dto.messageId}`);
+    return { messageId: response.key?.id };
+  }
+
+  async sendPoll(
+    dto: SendPollDto,
+  ): Promise<WhatsAppClientResponse> {
+    const slug = (dto as { tenantSlug?: string }).tenantSlug;
+    const instanceName = await this.getInstanceName(slug);
+    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+
+    const response = await this.makeRequest<{ key?: { id?: string } }>(
+      `/message/sendPoll/${instanceName}`,
+      'POST',
+      {
+        number: dto.phone,
+        name: dto.name,
+        selectableCount: dto.selectableCount ?? 1,
+        values: dto.options,
+      },
+    );
+
+    this.logger.log(`Poll sent to ${dto.phone}`);
+    return { messageId: response.key?.id };
   }
 
   async readMessages(phone: string): Promise<void> {
@@ -386,5 +587,295 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
 
     await this.makeRequest(`/instance/restart/${instanceName}`, 'PUT');
     this.logger.log('Instance restarted');
+  }
+
+  // ── Chat operations (direct, not through WhatsAppClientInterface) ──
+
+  async sendPresence(
+    instanceName: string,
+    phone: string,
+    presence: string,
+    delay?: number,
+  ): Promise<void> {
+    await this.makeRequest(`/chat/sendPresence/${instanceName}`, 'POST', {
+      number: `${phone}@s.whatsapp.net`,
+      presence,
+      delay: delay ?? 0,
+    });
+  }
+
+  async deleteMessage(
+    instanceName: string,
+    messageId: string,
+    remoteJid: string,
+    fromMe: boolean,
+  ): Promise<void> {
+    await this.makeRequest(
+      `/chat/deleteMessageForEveryone/${instanceName}`,
+      'POST',
+      { id: messageId, fromMe, remoteJid },
+    );
+  }
+
+  async editMessage(
+    instanceName: string,
+    messageId: string,
+    remoteJid: string,
+    fromMe: boolean,
+    text: string,
+  ): Promise<void> {
+    await this.makeRequest(
+      `/chat/updateMessage/${instanceName}`,
+      'POST',
+      {
+        number: remoteJid,
+        key: { remoteJid, fromMe, id: messageId },
+        text,
+      },
+    );
+  }
+
+  async blockContact(instanceName: string, phone: string): Promise<void> {
+    await this.makeRequest(
+      `/chat/updateBlockStatus/${instanceName}`,
+      'POST',
+      { number: `${phone}@s.whatsapp.net`, status: 'block' },
+    );
+  }
+
+  async unblockContact(instanceName: string, phone: string): Promise<void> {
+    await this.makeRequest(
+      `/chat/updateBlockStatus/${instanceName}`,
+      'POST',
+      { number: `${phone}@s.whatsapp.net`, status: 'unblock' },
+    );
+  }
+
+  async fetchProfile(
+    instanceName: string,
+    phone: string,
+  ): Promise<Record<string, unknown>> {
+    return this.makeRequest<Record<string, unknown>>(
+      `/chat/fetchProfile/${instanceName}`,
+      'POST',
+      { number: `${phone}@s.whatsapp.net` },
+    );
+  }
+
+  async updateProfileName(instanceName: string, name: string): Promise<void> {
+    await this.makeRequest(
+      `/chat/updateProfileName/${instanceName}`,
+      'POST',
+      { name },
+    );
+  }
+
+  async updateProfileStatus(instanceName: string, status: string): Promise<void> {
+    await this.makeRequest(
+      `/chat/updateProfileStatus/${instanceName}`,
+      'POST',
+      { status },
+    );
+  }
+
+  async updateProfilePicture(instanceName: string, picture: string): Promise<void> {
+    await this.makeRequest(
+      `/chat/updateProfilePicture/${instanceName}`,
+      'POST',
+      { picture },
+    );
+  }
+
+  async fetchPrivacySettings(instanceName: string): Promise<Record<string, unknown>> {
+    return this.makeRequest<Record<string, unknown>>(
+      `/chat/fetchPrivacySettings/${instanceName}`,
+      'GET',
+    );
+  }
+
+  async updatePrivacySettings(
+    instanceName: string,
+    settings: Record<string, string>,
+  ): Promise<void> {
+    await this.makeRequest(
+      `/chat/updatePrivacySettings/${instanceName}`,
+      'POST',
+      settings,
+    );
+  }
+
+  async setGlobalPresence(instanceName: string, presence: string): Promise<void> {
+    await this.makeRequest(
+      `/instance/setPresence/${instanceName}`,
+      'POST',
+      { presence },
+    );
+  }
+
+  async downloadMedia(
+    instanceName: string,
+    messageId: string,
+    remoteJid: string,
+    fromMe: boolean,
+  ): Promise<{ base64: string; mimetype: string }> {
+    return this.makeRequest<{ base64: string; mimetype: string }>(
+      `/chat/getBase64FromMediaMessage/${instanceName}`,
+      'POST',
+      { message: { key: { remoteJid, fromMe, id: messageId } } },
+    );
+  }
+
+  // ── Group operations ──────────────────────────────────────
+
+  async createGroup(
+    instanceName: string,
+    subject: string,
+    participants: string[],
+    description?: string,
+  ): Promise<Record<string, unknown>> {
+    return this.makeRequest<Record<string, unknown>>(
+      `/group/create/${instanceName}`,
+      'POST',
+      { subject, participants, description },
+    );
+  }
+
+  async fetchAllGroups(instanceName: string): Promise<Record<string, unknown>[]> {
+    return this.makeRequest<Record<string, unknown>[]>(
+      `/group/fetchAllGroups/${instanceName}?getParticipants=false`,
+      'GET',
+    );
+  }
+
+  async findGroupInfo(instanceName: string, groupJid: string): Promise<Record<string, unknown>> {
+    return this.makeRequest<Record<string, unknown>>(
+      `/group/findGroupInfos/${instanceName}?groupJid=${encodeURIComponent(groupJid)}`,
+      'GET',
+    );
+  }
+
+  async fetchGroupParticipants(instanceName: string, groupJid: string): Promise<Record<string, unknown>[]> {
+    return this.makeRequest<Record<string, unknown>[]>(
+      `/group/participants/${instanceName}?groupJid=${encodeURIComponent(groupJid)}`,
+      'GET',
+    );
+  }
+
+  async fetchGroupInviteCode(instanceName: string, groupJid: string): Promise<{ inviteCode: string }> {
+    return this.makeRequest<{ inviteCode: string }>(
+      `/group/inviteCode/${instanceName}?groupJid=${encodeURIComponent(groupJid)}`,
+      'GET',
+    );
+  }
+
+  async updateGroupSubject(instanceName: string, groupJid: string, subject: string): Promise<void> {
+    await this.makeRequest(
+      `/group/updateGroupSubject/${instanceName}`,
+      'POST',
+      { groupJid, subject },
+    );
+  }
+
+  async updateGroupDescription(instanceName: string, groupJid: string, description: string): Promise<void> {
+    await this.makeRequest(
+      `/group/updateGroupDescription/${instanceName}`,
+      'POST',
+      { groupJid, description },
+    );
+  }
+
+  async updateGroupPicture(instanceName: string, groupJid: string, picture: string): Promise<void> {
+    await this.makeRequest(
+      `/group/updateGroupPicture/${instanceName}`,
+      'POST',
+      { groupJid, image: picture },
+    );
+  }
+
+  async updateGroupParticipants(
+    instanceName: string,
+    groupJid: string,
+    action: string,
+    participants: string[],
+  ): Promise<Record<string, unknown>> {
+    return this.makeRequest<Record<string, unknown>>(
+      `/group/updateParticipant/${instanceName}`,
+      'POST',
+      { groupJid, action, participants },
+    );
+  }
+
+  async updateGroupSetting(instanceName: string, groupJid: string, action: string): Promise<void> {
+    await this.makeRequest(
+      `/group/updateSetting/${instanceName}`,
+      'POST',
+      { groupJid, action },
+    );
+  }
+
+  async sendGroupInvite(
+    instanceName: string,
+    groupJid: string,
+    numbers: string[],
+    description?: string,
+  ): Promise<void> {
+    await this.makeRequest(
+      `/group/sendInvite/${instanceName}`,
+      'POST',
+      { groupJid, numbers, description },
+    );
+  }
+
+  async leaveGroup(instanceName: string, groupJid: string): Promise<void> {
+    await this.makeRequest(
+      `/group/leaveGroup/${instanceName}?groupJid=${encodeURIComponent(groupJid)}`,
+      'DELETE',
+    );
+  }
+
+  // ── Labels ────────────────────────────────────────────────
+
+  async findLabels(instanceName: string): Promise<Record<string, unknown>[]> {
+    return this.makeRequest<Record<string, unknown>[]>(
+      `/label/findLabels/${instanceName}`,
+      'GET',
+    );
+  }
+
+  async handleLabel(
+    instanceName: string,
+    labelId: string,
+    chatId: string,
+    action: 'add' | 'remove',
+  ): Promise<void> {
+    await this.makeRequest(
+      `/label/handleLabel/${instanceName}`,
+      'POST',
+      { labelId, chatId, action },
+    );
+  }
+
+  // ── Archive ───────────────────────────────────────────────
+
+  async archiveChat(instanceName: string, chatId: string, archive: boolean): Promise<void> {
+    await this.makeRequest(
+      `/chat/archiveChat/${instanceName}`,
+      'POST',
+      { chat: chatId, archive },
+    );
+  }
+
+  // ── Status/Stories ────────────────────────────────────────
+
+  async sendStatus(
+    instanceName: string,
+    type: 'text' | 'image' | 'video' | 'audio',
+    content: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.makeRequest<Record<string, unknown>>(
+      `/message/sendStatus/${instanceName}`,
+      'POST',
+      { type, ...content },
+    );
   }
 }

@@ -15,6 +15,9 @@ import { ApiKeysModule } from './api-keys/api-keys.module';
 import { MessagesModule } from './messages/messages.module';
 import { BillingModule } from './billing/billing.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { ScheduledMessagesModule } from './scheduled/scheduled-messages.module';
+import { QueueModule } from './queue/queue.module';
 
 @Module({
   imports: [
@@ -29,11 +32,14 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
       limit: 200,
     }]),
     EventEmitterModule.forRoot({ wildcard: false, maxListeners: 20 }),
+    QueueModule,
     PrismaModule,
     TenantsModule,
     ApiKeysModule,
     MessagesModule,
     BillingModule,
+    WebhooksModule,
+    ScheduledMessagesModule,
     WhatsAppModule,
   ],
   providers: [

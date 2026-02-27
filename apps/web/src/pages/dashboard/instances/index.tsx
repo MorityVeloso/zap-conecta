@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Smartphone, Plus, RefreshCw, Wifi, WifiOff, Loader2, Trash2, QrCode } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -51,13 +52,20 @@ export function InstancesPage() {
   })
 
   const connectMutation = useMutation({
-    mutationFn: () => api.post<InstanceStatus>('/whatsapp/connect'),
+    mutationFn: () => api.post<InstanceStatus & { error?: string }>('/whatsapp/connect'),
     onSuccess: (data) => {
-      queryClient.setQueryData(['whatsapp', 'status'], data)
       if (data.status === 'QR_CODE') {
+        queryClient.setQueryData(['whatsapp', 'status'], data)
         setShowQrModal(true)
         setPollingEnabled(true)
+      } else if (data.error) {
+        toast.error(data.error)
+      } else {
+        toast.error('Não foi possível gerar o QR code. Tente novamente.')
       }
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Erro ao conectar')
     },
   })
 

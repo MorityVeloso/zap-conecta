@@ -3,9 +3,13 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 import { AppModule } from './app.module';
 import { PrismaService } from './prisma/prisma.service';
+import { ZodExceptionFilter } from './common/filters/zod-exception.filter';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
+
+  // Global Zod validation filter
+  app.useGlobalFilters(new ZodExceptionFilter());
 
   // CORS — permite frontend local e produção
   const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';

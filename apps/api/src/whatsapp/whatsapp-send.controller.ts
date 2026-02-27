@@ -2,7 +2,9 @@
  * WhatsAppSendController — all message send endpoints.
  * Enforces per-tenant monthly quota before each send.
  */
-import { Controller, Post, Body } from '@nestjs/common';
+import { Controller, Post, Body, Inject } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import {
   ApiTags,
   ApiSecurity,
@@ -20,8 +22,26 @@ import type {
   SendDocumentMessageDto,
   SendPixMessageDto,
   SendTemplateMessageDto,
+  SendAudioMessageDto,
+  SendVideoMessageDto,
+  SendStickerMessageDto,
+  SendLocationMessageDto,
+  SendContactMessageDto,
+  SendReactionDto,
+  SendPollDto,
+  CheckNumberDto,
+  ReadMessagesDto,
 } from './dto/message.dto';
+import type { BulkSendDto } from './dto/bulk.dto';
+import type { BulkSendJobData } from './bulk-send.processor';
+import { QUEUE_BULK_SEND } from '../queue/queue.constants';
+import { EvolutionInstanceService } from './evolution-instance.service';
 import { WhatsAppService, type MessageResult } from './whatsapp.service';
+
+/** Inject tenantSlug into DTO so EvolutionApiClient resolves the correct instance */
+function withTenant<T>(dto: T, tenant: TenantContext): T {
+  return Object.assign({}, dto, { tenantSlug: tenant.tenantSlug }) as T;
+}
 
 @ApiTags('WhatsApp')
 @ApiSecurity('x-api-key')
@@ -30,16 +50,24 @@ export class WhatsAppSendController {
   constructor(
     private readonly whatsAppService: WhatsAppService,
     private readonly usageService: UsageService,
+    private readonly evolutionInstanceService: EvolutionInstanceService,
+    @InjectQueue(QUEUE_BULK_SEND) private readonly bulkQueue: Queue<BulkSendJobData>,
   ) {}
+
+  private async getInstanceId(tenantSlug: string): Promise<string> {
+    const instance = await this.evolutionInstanceService.findByTenant(tenantSlug);
+    return instance?.id ?? tenantSlug;
+  }
 
   @Post('send/text')
   @ApiOperation({ summary: 'Send a text message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Text message sent' })
   async sendText(@CurrentTenant() tenant: TenantContext, @Body() dto: SendTextMessageDto): Promise<MessageResult> {
     await this.usageService.assertBelowQuota(tenant.tenantId);
-    const result = await this.whatsAppService.sendTextMessage(dto);
+    const result = await this.whatsAppService.sendTextMessage(withTenant(dto, tenant));
     if (result.success) {
-      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'text', { text: dto.message }, result.messageId);
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'text', { text: dto.message }, result.messageId);
     }
     return result;
   }
@@ -49,9 +77,10 @@ export class WhatsAppSendController {
   @ApiResponse({ status: 201, description: 'Button message sent' })
   async sendButton(@CurrentTenant() tenant: TenantContext, @Body() dto: SendButtonMessageDto): Promise<MessageResult> {
     await this.usageService.assertBelowQuota(tenant.tenantId);
-    const result = await this.whatsAppService.sendButtonMessage(dto);
+    const result = await this.whatsAppService.sendButtonMessage(withTenant(dto, tenant));
     if (result.success) {
-      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'button', { title: dto.title }, result.messageId);
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'button', { title: dto.title }, result.messageId);
     }
     return result;
   }
@@ -61,9 +90,10 @@ export class WhatsAppSendController {
   @ApiResponse({ status: 201, description: 'List message sent' })
   async sendList(@CurrentTenant() tenant: TenantContext, @Body() dto: SendListMessageDto): Promise<MessageResult> {
     await this.usageService.assertBelowQuota(tenant.tenantId);
-    const result = await this.whatsAppService.sendListMessage(dto);
+    const result = await this.whatsAppService.sendListMessage(withTenant(dto, tenant));
     if (result.success) {
-      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'list', { title: dto.title }, result.messageId);
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'list', { title: dto.title }, result.messageId);
     }
     return result;
   }
@@ -73,9 +103,10 @@ export class WhatsAppSendController {
   @ApiResponse({ status: 201, description: 'Image message sent' })
   async sendImage(@CurrentTenant() tenant: TenantContext, @Body() dto: SendImageMessageDto): Promise<MessageResult> {
     await this.usageService.assertBelowQuota(tenant.tenantId);
-    const result = await this.whatsAppService.sendImageMessage(dto);
+    const result = await this.whatsAppService.sendImageMessage(withTenant(dto, tenant));
     if (result.success) {
-      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'image', { image: dto.image }, result.messageId);
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'image', { image: dto.image }, result.messageId);
     }
     return result;
   }
@@ -85,9 +116,10 @@ export class WhatsAppSendController {
   @ApiResponse({ status: 201, description: 'Document message sent' })
   async sendDocument(@CurrentTenant() tenant: TenantContext, @Body() dto: SendDocumentMessageDto): Promise<MessageResult> {
     await this.usageService.assertBelowQuota(tenant.tenantId);
-    const result = await this.whatsAppService.sendDocumentMessage(dto);
+    const result = await this.whatsAppService.sendDocumentMessage(withTenant(dto, tenant));
     if (result.success) {
-      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'document', { document: dto.document }, result.messageId);
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'document', { document: dto.document }, result.messageId);
     }
     return result;
   }
@@ -97,9 +129,10 @@ export class WhatsAppSendController {
   @ApiResponse({ status: 201, description: 'PIX message sent' })
   async sendPix(@CurrentTenant() tenant: TenantContext, @Body() dto: SendPixMessageDto): Promise<MessageResult> {
     await this.usageService.assertBelowQuota(tenant.tenantId);
-    const result = await this.whatsAppService.sendPixMessage(dto);
+    const result = await this.whatsAppService.sendPixMessage(withTenant(dto, tenant));
     if (result.success) {
-      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'pix', { amount: dto.amount }, result.messageId);
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'pix', { amount: dto.amount }, result.messageId);
     }
     return result;
   }
@@ -109,10 +142,148 @@ export class WhatsAppSendController {
   @ApiResponse({ status: 201, description: 'Template message sent' })
   async sendTemplate(@CurrentTenant() tenant: TenantContext, @Body() dto: SendTemplateMessageDto): Promise<MessageResult> {
     await this.usageService.assertBelowQuota(tenant.tenantId);
-    const result = await this.whatsAppService.sendTemplateMessage(dto);
+    const result = await this.whatsAppService.sendTemplateMessage(withTenant(dto, tenant));
     if (result.success) {
-      this.whatsAppService.emitSent(tenant.tenantId, tenant.tenantSlug, dto.phone, 'template', { templateId: dto.templateId }, result.messageId);
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'template', { templateId: dto.templateId }, result.messageId);
     }
     return result;
+  }
+
+  @Post('send/audio')
+  @ApiOperation({ summary: 'Send an audio message via WhatsApp' })
+  @ApiResponse({ status: 201, description: 'Audio message sent' })
+  async sendAudio(@CurrentTenant() tenant: TenantContext, @Body() dto: SendAudioMessageDto): Promise<MessageResult> {
+    await this.usageService.assertBelowQuota(tenant.tenantId);
+    const result = await this.whatsAppService.sendAudioMessage(withTenant(dto, tenant));
+    if (result.success) {
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'audio', { audio: dto.audio }, result.messageId);
+    }
+    return result;
+  }
+
+  @Post('send/video')
+  @ApiOperation({ summary: 'Send a video message via WhatsApp' })
+  @ApiResponse({ status: 201, description: 'Video message sent' })
+  async sendVideo(@CurrentTenant() tenant: TenantContext, @Body() dto: SendVideoMessageDto): Promise<MessageResult> {
+    await this.usageService.assertBelowQuota(tenant.tenantId);
+    const result = await this.whatsAppService.sendVideoMessage(withTenant(dto, tenant));
+    if (result.success) {
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'video', { video: dto.video }, result.messageId);
+    }
+    return result;
+  }
+
+  @Post('send/sticker')
+  @ApiOperation({ summary: 'Send a sticker message via WhatsApp' })
+  @ApiResponse({ status: 201, description: 'Sticker message sent' })
+  async sendSticker(@CurrentTenant() tenant: TenantContext, @Body() dto: SendStickerMessageDto): Promise<MessageResult> {
+    await this.usageService.assertBelowQuota(tenant.tenantId);
+    const result = await this.whatsAppService.sendStickerMessage(withTenant(dto, tenant));
+    if (result.success) {
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'sticker', { sticker: dto.sticker }, result.messageId);
+    }
+    return result;
+  }
+
+  @Post('send/location')
+  @ApiOperation({ summary: 'Send a location message via WhatsApp' })
+  @ApiResponse({ status: 201, description: 'Location message sent' })
+  async sendLocation(@CurrentTenant() tenant: TenantContext, @Body() dto: SendLocationMessageDto): Promise<MessageResult> {
+    await this.usageService.assertBelowQuota(tenant.tenantId);
+    const result = await this.whatsAppService.sendLocationMessage(withTenant(dto, tenant));
+    if (result.success) {
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'location', { latitude: dto.latitude, longitude: dto.longitude }, result.messageId);
+    }
+    return result;
+  }
+
+  @Post('send/contact')
+  @ApiOperation({ summary: 'Send a contact card message via WhatsApp' })
+  @ApiResponse({ status: 201, description: 'Contact message sent' })
+  async sendContact(@CurrentTenant() tenant: TenantContext, @Body() dto: SendContactMessageDto): Promise<MessageResult> {
+    await this.usageService.assertBelowQuota(tenant.tenantId);
+    const result = await this.whatsAppService.sendContactMessage(withTenant(dto, tenant));
+    if (result.success) {
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'contact', { contacts: dto.contacts }, result.messageId);
+    }
+    return result;
+  }
+
+  @Post('send/reaction')
+  @ApiOperation({ summary: 'Send an emoji reaction to a message' })
+  @ApiResponse({ status: 201, description: 'Reaction sent' })
+  async sendReaction(@CurrentTenant() tenant: TenantContext, @Body() dto: SendReactionDto): Promise<MessageResult> {
+    return this.whatsAppService.sendReaction(withTenant(dto, tenant));
+  }
+
+  @Post('send/poll')
+  @ApiOperation({ summary: 'Send a poll message via WhatsApp' })
+  @ApiResponse({ status: 201, description: 'Poll message sent' })
+  async sendPoll(@CurrentTenant() tenant: TenantContext, @Body() dto: SendPollDto): Promise<MessageResult> {
+    await this.usageService.assertBelowQuota(tenant.tenantId);
+    const result = await this.whatsAppService.sendPoll(withTenant(dto, tenant));
+    if (result.success) {
+      const instanceId = await this.getInstanceId(tenant.tenantSlug);
+      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'poll', { name: dto.name, options: dto.options }, result.messageId);
+    }
+    return result;
+  }
+
+  @Post('check-number')
+  @ApiOperation({ summary: 'Check if a phone number has WhatsApp' })
+  @ApiResponse({ status: 200, description: 'Number checked' })
+  async checkNumber(@CurrentTenant() tenant: TenantContext, @Body() dto: CheckNumberDto): Promise<{ exists: boolean; jid?: string }> {
+    return this.whatsAppService.checkNumber(dto.phone);
+  }
+
+  @Post('read-messages')
+  @ApiOperation({ summary: 'Mark messages from a phone as read' })
+  @ApiResponse({ status: 200, description: 'Messages marked as read' })
+  async readMessages(@CurrentTenant() tenant: TenantContext, @Body() dto: ReadMessagesDto): Promise<{ success: boolean }> {
+    await this.whatsAppService.readMessages(dto.phone);
+    return { success: true };
+  }
+
+  @Post('send/bulk')
+  @ApiOperation({ summary: 'Send a message to multiple recipients (queued)' })
+  @ApiResponse({ status: 201, description: 'Bulk send enqueued' })
+  async sendBulk(
+    @CurrentTenant() tenant: TenantContext,
+    @Body() dto: BulkSendDto,
+  ): Promise<{ batchId: string; total: number }> {
+    await this.usageService.assertBelowQuota(tenant.tenantId);
+
+    const batchId = crypto.randomUUID();
+    const delay = dto.delay ?? 1000;
+
+    await Promise.all(
+      dto.recipients.map((phone, index) =>
+        this.bulkQueue.add(
+          'bulk-send',
+          {
+            tenantSlug: tenant.tenantSlug,
+            phone,
+            type: dto.message.type,
+            text: dto.message.text,
+            mediaUrl: dto.message.mediaUrl,
+            caption: dto.message.caption,
+            fileName: dto.message.fileName,
+          },
+          {
+            delay: index * delay,
+            removeOnComplete: 100,
+            removeOnFail: 200,
+          },
+        ),
+      ),
+    );
+
+    return { batchId, total: dto.recipients.length };
   }
 }

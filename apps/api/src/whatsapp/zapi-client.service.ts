@@ -6,7 +6,7 @@
  * Kept for rollback via WHATSAPP_PROVIDER=zapi environment variable.
  */
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotImplementedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import type {
@@ -16,7 +16,15 @@ import type {
   SendImageMessageDto,
   SendDocumentMessageDto,
   SendPixMessageDto,
+  SendAudioMessageDto,
+  SendVideoMessageDto,
+  SendStickerMessageDto,
+  SendLocationMessageDto,
+  SendContactMessageDto,
+  SendReactionDto,
+  SendPollDto,
 } from './dto/message.dto';
+import type { WhatsAppClientResponse } from './whatsapp-client.interface';
 
 /** @deprecated Use WhatsAppClientResponse instead */
 export interface ZApiResponse {
@@ -364,6 +372,34 @@ export class ZApiClientService {
     }>(`profile-picture/${phone}`, 'GET');
 
     return { url: response.profilePictureUrl };
+  }
+
+  async sendAudioMessage(_dto: SendAudioMessageDto): Promise<WhatsAppClientResponse> {
+    throw new NotImplementedException('Z-API sendAudioMessage not implemented — use Evolution API');
+  }
+
+  async sendVideoMessage(_dto: SendVideoMessageDto): Promise<WhatsAppClientResponse> {
+    throw new NotImplementedException('Z-API sendVideoMessage not implemented — use Evolution API');
+  }
+
+  async sendStickerMessage(_dto: SendStickerMessageDto): Promise<WhatsAppClientResponse> {
+    throw new NotImplementedException('Z-API sendStickerMessage not implemented — use Evolution API');
+  }
+
+  async sendLocationMessage(_dto: SendLocationMessageDto): Promise<WhatsAppClientResponse> {
+    throw new NotImplementedException('Z-API sendLocationMessage not implemented — use Evolution API');
+  }
+
+  async sendContactMessage(_dto: SendContactMessageDto): Promise<WhatsAppClientResponse> {
+    throw new NotImplementedException('Z-API sendContactMessage not implemented — use Evolution API');
+  }
+
+  async sendReaction(_dto: SendReactionDto): Promise<WhatsAppClientResponse> {
+    throw new NotImplementedException('Z-API sendReaction not implemented — use Evolution API');
+  }
+
+  async sendPoll(_dto: SendPollDto): Promise<WhatsAppClientResponse> {
+    throw new NotImplementedException('Z-API sendPoll not implemented — use Evolution API');
   }
 
   /**

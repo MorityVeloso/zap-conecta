@@ -22,6 +22,13 @@ import type {
   SendDocumentMessageDto,
   SendPixMessageDto,
   SendTemplateMessageDto,
+  SendAudioMessageDto,
+  SendVideoMessageDto,
+  SendStickerMessageDto,
+  SendLocationMessageDto,
+  SendContactMessageDto,
+  SendReactionDto,
+  SendPollDto,
 } from './dto/message.dto';
 import type {
   ReceivedMessageWebhook,
@@ -169,7 +176,80 @@ export class WhatsAppService {
       }
     }
 
-    return this.sendTextMessage({ phone: dto.phone, message });
+    return this.sendTextMessage({ ...dto, phone: dto.phone, message });
+  }
+
+  async sendAudioMessage(dto: SendAudioMessageDto): Promise<MessageResult> {
+    this.ensureConfigured();
+    try {
+      return this.mapResponse(await this.whatsappClient.sendAudioMessage(dto));
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async sendVideoMessage(dto: SendVideoMessageDto): Promise<MessageResult> {
+    this.ensureConfigured();
+    try {
+      return this.mapResponse(await this.whatsappClient.sendVideoMessage(dto));
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async sendStickerMessage(dto: SendStickerMessageDto): Promise<MessageResult> {
+    this.ensureConfigured();
+    try {
+      return this.mapResponse(await this.whatsappClient.sendStickerMessage(dto));
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async sendLocationMessage(dto: SendLocationMessageDto): Promise<MessageResult> {
+    this.ensureConfigured();
+    try {
+      return this.mapResponse(await this.whatsappClient.sendLocationMessage(dto));
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async sendContactMessage(dto: SendContactMessageDto): Promise<MessageResult> {
+    this.ensureConfigured();
+    try {
+      return this.mapResponse(await this.whatsappClient.sendContactMessage(dto));
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async sendReaction(dto: SendReactionDto): Promise<MessageResult> {
+    this.ensureConfigured();
+    try {
+      return this.mapResponse(await this.whatsappClient.sendReaction(dto));
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async sendPoll(dto: SendPollDto): Promise<MessageResult> {
+    this.ensureConfigured();
+    try {
+      return this.mapResponse(await this.whatsappClient.sendPoll(dto));
+    } catch (error) {
+      return this.handleError(error);
+    }
+  }
+
+  async readMessages(phone: string): Promise<void> {
+    this.ensureConfigured();
+    await this.whatsappClient.readMessages(phone);
+  }
+
+  async checkNumber(phone: string): Promise<{ exists: boolean; jid?: string }> {
+    this.ensureConfigured();
+    return this.whatsappClient.checkNumber(phone);
   }
 
   // ── Webhook handlers ───────────────────────────────────────
@@ -250,8 +330,22 @@ export class WhatsAppService {
     });
   }
 
-  handleMessageStatus(payload: MessageStatusWebhook): void {
+  handleMessageStatus(
+    payload: MessageStatusWebhook,
+    tenantId?: string,
+    instanceId?: string,
+  ): void {
     this.logger.log(`Message ${payload.messageId} status: ${payload.status}`);
+
+    if (tenantId && instanceId) {
+      void this.eventEmitter.emitAsync('whatsapp.message.status', {
+        tenantId,
+        instanceId,
+        messageId: payload.messageId,
+        status: payload.status,
+        phone: payload.phone,
+      });
+    }
   }
 
   // ── Private ────────────────────────────────────────────────

@@ -11,6 +11,13 @@ import type {
   SendImageMessageDto,
   SendDocumentMessageDto,
   SendPixMessageDto,
+  SendAudioMessageDto,
+  SendVideoMessageDto,
+  SendStickerMessageDto,
+  SendLocationMessageDto,
+  SendContactMessageDto,
+  SendReactionDto,
+  SendPollDto,
 } from './dto/message.dto';
 
 /**
@@ -60,6 +67,27 @@ export interface WhatsAppClientInterface {
 
   /** Send a PIX payment message */
   sendPixMessage(dto: SendPixMessageDto): Promise<WhatsAppClientResponse>;
+
+  /** Send an audio message */
+  sendAudioMessage(dto: SendAudioMessageDto): Promise<WhatsAppClientResponse>;
+
+  /** Send a video message */
+  sendVideoMessage(dto: SendVideoMessageDto): Promise<WhatsAppClientResponse>;
+
+  /** Send a sticker message */
+  sendStickerMessage(dto: SendStickerMessageDto): Promise<WhatsAppClientResponse>;
+
+  /** Send a location message */
+  sendLocationMessage(dto: SendLocationMessageDto): Promise<WhatsAppClientResponse>;
+
+  /** Send a contact card message */
+  sendContactMessage(dto: SendContactMessageDto): Promise<WhatsAppClientResponse>;
+
+  /** Send an emoji reaction to a message */
+  sendReaction(dto: SendReactionDto): Promise<WhatsAppClientResponse>;
+
+  /** Send a poll message */
+  sendPoll(dto: SendPollDto): Promise<WhatsAppClientResponse>;
 
   /** Mark messages as read */
   readMessages(phone: string): Promise<void>;

@@ -21,6 +21,15 @@ const BaseMessageDtoSchema = z.object({
 });
 
 /**
+ * Quoted message reference (reply/quote)
+ */
+export const QuotedMessageSchema = z.object({
+  messageId: z.string().min(1),
+  remoteJid: z.string().min(1),
+  fromMe: z.boolean(),
+});
+
+/**
  * Text Message DTO
  */
 export const SendTextMessageDtoSchema = BaseMessageDtoSchema.extend({
@@ -28,6 +37,7 @@ export const SendTextMessageDtoSchema = BaseMessageDtoSchema.extend({
     .string()
     .min(1, 'Message is required')
     .max(4096, 'Message must be at most 4096 characters'),
+  quoted: QuotedMessageSchema.optional(),
 });
 
 export type SendTextMessageDto = z.infer<typeof SendTextMessageDtoSchema> & {
@@ -124,6 +134,7 @@ export const SendImageMessageDtoSchema = BaseMessageDtoSchema.extend({
     .string()
     .max(1024, 'Caption must be at most 1024 characters')
     .optional(),
+  quoted: QuotedMessageSchema.optional(),
 });
 
 export type SendImageMessageDto = z.infer<typeof SendImageMessageDtoSchema>;
@@ -141,6 +152,7 @@ export const SendDocumentMessageDtoSchema = BaseMessageDtoSchema.extend({
     .string()
     .max(1024, 'Caption must be at most 1024 characters')
     .optional(),
+  quoted: QuotedMessageSchema.optional(),
 });
 
 export type SendDocumentMessageDto = z.infer<
@@ -221,3 +233,116 @@ export const MessageType = {
 } as const;
 
 export type MessageType = (typeof MessageType)[keyof typeof MessageType];
+
+/**
+ * Audio Message DTO
+ */
+export const SendAudioMessageDtoSchema = BaseMessageDtoSchema.extend({
+  audio: z.string().url('Invalid audio URL'),
+  ptt: z.boolean().optional().default(true),
+  quoted: QuotedMessageSchema.optional(),
+});
+
+export type SendAudioMessageDto = z.infer<typeof SendAudioMessageDtoSchema>;
+
+/**
+ * Video Message DTO
+ */
+export const SendVideoMessageDtoSchema = BaseMessageDtoSchema.extend({
+  video: z.string().url('Invalid video URL'),
+  caption: z
+    .string()
+    .max(1024, 'Caption must be at most 1024 characters')
+    .optional(),
+  quoted: QuotedMessageSchema.optional(),
+});
+
+export type SendVideoMessageDto = z.infer<typeof SendVideoMessageDtoSchema>;
+
+/**
+ * Sticker Message DTO
+ */
+export const SendStickerMessageDtoSchema = BaseMessageDtoSchema.extend({
+  sticker: z.string().url('Invalid sticker URL'),
+});
+
+export type SendStickerMessageDto = z.infer<typeof SendStickerMessageDtoSchema>;
+
+/**
+ * Location Message DTO
+ */
+export const SendLocationMessageDtoSchema = BaseMessageDtoSchema.extend({
+  latitude: z.number().min(-90).max(90),
+  longitude: z.number().min(-180).max(180),
+  name: z.string().max(100).optional(),
+  address: z.string().max(256).optional(),
+});
+
+export type SendLocationMessageDto = z.infer<typeof SendLocationMessageDtoSchema>;
+
+/**
+ * Contact card entry
+ */
+export const ContactEntrySchema = z.object({
+  fullName: z.string().min(1),
+  phoneNumber: z.string().min(1),
+  organization: z.string().optional(),
+  email: z.string().email().optional(),
+});
+
+/**
+ * Contact Message DTO
+ */
+export const SendContactMessageDtoSchema = BaseMessageDtoSchema.extend({
+  contacts: z.array(ContactEntrySchema).min(1).max(10),
+});
+
+export type SendContactMessageDto = z.infer<typeof SendContactMessageDtoSchema>;
+
+/**
+ * Reaction DTO (emoji reaction to a message)
+ */
+export const SendReactionDtoSchema = z.object({
+  messageId: z.string().min(1),
+  remoteJid: z.string().min(1),
+  fromMe: z.boolean(),
+  reaction: z.string().max(2, 'Send empty string to remove reaction'),
+});
+
+export type SendReactionDto = z.infer<typeof SendReactionDtoSchema>;
+
+/**
+ * Poll Message DTO
+ */
+export const SendPollDtoSchema = BaseMessageDtoSchema.extend({
+  name: z.string().min(1).max(256, 'Poll question must be at most 256 characters'),
+  options: z
+    .array(z.string().min(1).max(100))
+    .min(2, 'At least 2 options required')
+    .max(12, 'Maximum 12 options allowed'),
+  selectableCount: z.number().int().min(1).max(12).optional().default(1),
+});
+
+export type SendPollDto = z.infer<typeof SendPollDtoSchema>;
+
+/**
+ * Check Number DTO
+ */
+export const CheckNumberDtoSchema = z.object({
+  phone: z
+    .string()
+    .regex(phoneRegex, 'Invalid phone number format'),
+});
+
+export type CheckNumberDto = z.infer<typeof CheckNumberDtoSchema>;
+
+/**
+ * Read Messages DTO
+ */
+export const ReadMessagesDtoSchema = z.object({
+  phone: z
+    .string()
+    .regex(phoneRegex, 'Invalid phone number format'),
+});
+
+export type ReadMessagesDto = z.infer<typeof ReadMessagesDtoSchema>;

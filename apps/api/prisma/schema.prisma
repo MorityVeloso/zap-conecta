@@ -44,9 +44,10 @@ model Tenant {
   instances    WhatsAppInstance[]
   apiKeys      ApiKey[]
   messages     Message[]
-  webhooks     Webhook[]
-  subscription Subscription?
-  usageRecords UsageRecord[]
+  webhooks          Webhook[]
+  subscription      Subscription?
+  usageRecords      UsageRecord[]
+  scheduledMessages ScheduledMessage[]
 
   @@map("tenants")
 }
@@ -224,6 +225,35 @@ model UsageRecord {
   @@unique([tenantId, period])
   @@index([tenantId])
   @@map("usage_records")
+}
+
+// ─── Mensagens agendadas ──────────────────────────────────────────────────
+
+model ScheduledMessage {
+  id          String                 @id @default(uuid())
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId    String
+  instanceId  String
+  phone       String
+  type        MessageType
+  payload     Json // full message payload (text, mediaUrl, caption, etc.)
+  scheduledAt DateTime
+  status      ScheduledMessageStatus @default(PENDING)
+  sentAt      DateTime?
+  error       String?
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  @@index([tenantId, status])
+  @@index([scheduledAt])
+  @@map("scheduled_messages")
+}
+
+enum ScheduledMessageStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
 }
 
 // ─── Webhooks customizados ────────────────────────────────────────────────
