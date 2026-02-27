@@ -7,6 +7,13 @@ import { PrismaService } from './prisma/prisma.service';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
 
+  // CORS — permite frontend local e produção
+  const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+  app.enableCors({
+    origin: [frontendUrl, 'http://localhost:5173', 'http://localhost:3000'],
+    credentials: true,
+  });
+
   // Prisma shutdown hooks
   const prisma = app.get(PrismaService);
   prisma.enableShutdownHooks(app);
