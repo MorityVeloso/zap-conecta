@@ -2,7 +2,21 @@
   "permissions": {
     "allow": [
       "Bash(pnpm --version:*)",
-      "Bash(pnpm --filter @zap-conecta/api test:*)"
+      "Bash(pnpm --filter @zap-conecta/api test:*)",
+      "Bash(pnpm --filter api test:*)",
+      "mcp__plugin_playwright_playwright__browser_click",
+      "mcp__plugin_playwright_playwright__browser_take_screenshot",
+      "Bash(__NEW_LINE_aadef51c47d2e1cd__ echo \"=== kratton.com.br ===\")",
+      "Bash(__NEW_LINE_aadef51c47d2e1cd__ echo \"\")",
+      "Bash(/tmp/msg.json:*)",
+      "Bash(pnpm --filter @zap-conecta/api exec prisma generate:*)",
+      "Bash(shasum:*)",
+      "mcp__plugin_serena_serena__read_file",
+      "Read(//Users/mority/zap-conecta/**)",
+      "Bash(docker compose up:*)",
+      "Bash(EVOLUTION_SVC=\"b5a277a1-7c76-4cab-a839-76f5f5f5c618\")",
+      "Bash(__NEW_LINE_3dc40cc8ca73c9b6__ echo \"=== API ===\")",
+      "Bash(__NEW_LINE_9334a29f8d1150af__ echo \"=== Evolution ===\")"
     ]
   }
 }

@@ -43,3 +43,7 @@ coverage/
 playwright-report/
 test-results/
 e2e/.auth/
+.playwright-mcp/
+
+# Tool caches
+.serena/
