@@ -154,7 +154,7 @@ const scheduledRoute = createRoute({
   ),
 })
 
-// ─── Index redirect ───────────────────────────────────────────────────────
+// ─── Redirects ───────────────────────────────────────────────────────────
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -162,10 +162,24 @@ const indexRoute = createRoute({
   beforeLoad: () => { throw redirect({ to: '/dashboard' }) },
 })
 
+const loginShortcut = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/login',
+  beforeLoad: () => { throw redirect({ to: '/auth/login' }) },
+})
+
+const signupShortcut = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/signup',
+  beforeLoad: () => { throw redirect({ to: '/auth/signup' }) },
+})
+
 // ─── Route tree ───────────────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  loginShortcut,
+  signupShortcut,
   authLoginRoute,
   authSignupRoute,
   dashboardLayout.addChildren([
