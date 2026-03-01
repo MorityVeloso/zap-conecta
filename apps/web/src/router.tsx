@@ -14,6 +14,7 @@ import { DashboardLayout } from '@/components/layout/dashboard-layout'
 // Pages
 import { LoginPage } from '@/pages/auth/login'
 import { SignupPage } from '@/pages/auth/signup'
+import { ResetPasswordPage } from '@/pages/auth/reset-password'
 import { DashboardPage } from '@/pages/dashboard'
 
 // ─── Root ─────────────────────────────────────────────────────────────────
@@ -64,6 +65,12 @@ const authSignupRoute = createRoute({
   path: '/auth/signup',
   beforeLoad: redirectIfAuthed,
   component: SignupPage,
+})
+
+const authResetPasswordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/auth/reset-password',
+  component: ResetPasswordPage,
 })
 
 // ─── Dashboard routes ─────────────────────────────────────────────────────
@@ -182,6 +189,7 @@ const routeTree = rootRoute.addChildren([
   signupShortcut,
   authLoginRoute,
   authSignupRoute,
+  authResetPasswordRoute,
   dashboardLayout.addChildren([
     dashboardIndexRoute,
     instancesRoute,

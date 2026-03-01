@@ -32,7 +32,7 @@ function ForgotPasswordDialog({ open, onClose }: { open: boolean; onClose: () =>
     setLoading(true)
     setError(null)
     const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/login`,
+      redirectTo: `${window.location.origin}/auth/reset-password`,
     })
     setLoading(false)
     if (err) { setError(err.message); return }
