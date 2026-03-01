@@ -13,7 +13,6 @@ import {
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
-import { ConversationStateService } from './conversation-state.service';
 import type {
   SendTextMessageDto,
   SendButtonMessageDto,
@@ -65,7 +64,6 @@ export class WhatsAppService {
   constructor(
     @Inject(WHATSAPP_CLIENT)
     private readonly whatsappClient: WhatsAppClientInterface,
-    private readonly conversationState: ConversationStateService,
     private readonly eventEmitter: EventEmitter2,
   ) {}
 

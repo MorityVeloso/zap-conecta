@@ -269,6 +269,25 @@ model Webhook {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  deliveryLogs WebhookDeliveryLog[]
+
   @@index([tenantId])
   @@map("webhooks")
+}
+
+model WebhookDeliveryLog {
+  id         String   @id @default(uuid())
+  webhook    Webhook  @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  webhookId  String
+  event      String   // e.g. 'message.received', 'test'
+  success    Boolean
+  statusCode Int?
+  durationMs Int
+  attempt    Int      @default(1)
+  error      String?
+  createdAt  DateTime @default(now())
+
+  @@index([webhookId])
+  @@index([webhookId, createdAt(sort: Desc)])
+  @@map("webhook_delivery_logs")
 }

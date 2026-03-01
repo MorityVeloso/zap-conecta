@@ -13,7 +13,6 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { BillingModule } from '../billing/billing.module';
 import { QUEUE_WEBHOOK_DELIVERY, QUEUE_BULK_SEND } from '../queue/queue.constants';
 
-import { ConversationStateService } from './conversation-state.service';
 import { EvolutionApiClientService } from './evolution-api-client.service';
 import { EvolutionInstanceService } from './evolution-instance.service';
 import { BulkSendProcessor } from './bulk-send.processor';
@@ -50,7 +49,6 @@ import { ZApiClientService } from './zapi-client.service';
     ZApiClientService,
     EvolutionApiClientService,
     EvolutionInstanceService,
-    ConversationStateService,
     BulkSendProcessor,
     WebhookDeliveryProcessor,
     WebhookDispatcherService,

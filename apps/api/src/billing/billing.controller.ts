@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   HttpCode,
@@ -22,6 +23,7 @@ import type { TenantContext } from '../auth/supabase-jwt.guard';
 import {
   BillingService,
   type SubscribeDto,
+  type ChangePlanDto,
   type AsaasWebhookPayload,
 } from './billing.service';
 import { UsageService } from './usage.service';
@@ -69,12 +71,27 @@ export class BillingController {
     return this.billingService.subscribe(tenant.tenantId, dto);
   }
 
+  @Patch('subscription')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Change current plan' })
+  @ApiResponse({ status: 200, description: 'Plan changed' })
+  changePlan(@CurrentTenant() tenant: TenantContext, @Body() dto: ChangePlanDto) {
+    return this.billingService.changePlan(tenant.tenantId, dto);
+  }
+
   @Delete('subscription')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Cancel current subscription' })
   @ApiResponse({ status: 204, description: 'Subscription cancelled' })
   async cancelSubscription(@CurrentTenant() tenant: TenantContext): Promise<void> {
     await this.billingService.cancelSubscription(tenant.tenantId);
+  }
+
+  @Get('payments')
+  @ApiOperation({ summary: 'List recent payments from Asaas' })
+  @ApiResponse({ status: 200, description: 'Payments returned' })
+  getPayments(@CurrentTenant() tenant: TenantContext) {
+    return this.billingService.getPayments(tenant.tenantId);
   }
 
   /**

@@ -13,6 +13,7 @@ import {
   UsePipes,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import {
   ApiTags,
   ApiOperation,
@@ -42,6 +43,7 @@ export class WhatsAppWebhookController {
     private readonly whatsAppService: WhatsAppService,
     private readonly configService: ConfigService,
     private readonly evolutionInstanceService: EvolutionInstanceService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   @Post('webhook/receive/:tenantSlug')
@@ -149,6 +151,23 @@ export class WhatsAppWebhookController {
           return;
         }
         this.logger.log(`Connection update: state=${parsed.data.state}`);
+        const inst = await this.evolutionInstanceService.findByTenant(tenantSlug);
+        if (inst) {
+          if (parsed.data.state === 'open') {
+            this.eventEmitter.emit('whatsapp.instance.connected', {
+              tenantId: inst.tenantId,
+              tenantSlug,
+              instanceId: inst.id,
+              phone: parsed.data.number ?? undefined,
+            });
+          } else if (parsed.data.state === 'close') {
+            this.eventEmitter.emit('whatsapp.instance.disconnected', {
+              tenantId: inst.tenantId,
+              tenantSlug,
+              instanceId: inst.id,
+            });
+          }
+        }
         break;
       }
 

@@ -24,6 +24,12 @@ export const SignupDtoSchema = z.object({
 
 export type SignupDto = z.infer<typeof SignupDtoSchema>;
 
+export const UpdateTenantDtoSchema = z.object({
+  name: z.string().min(2).max(100),
+});
+
+export type UpdateTenantDto = z.infer<typeof UpdateTenantDtoSchema>;
+
 function generateSlug(name: string): string {
   return name
     .toLowerCase()
@@ -138,6 +144,14 @@ export class TenantsService {
       tenantId: tenant.id,
       tenantSlug: tenant.slug,
     };
+  }
+
+  async updateTenant(ctx: TenantContext, dto: UpdateTenantDto) {
+    const tenant = await this.prisma.tenant.update({
+      where: { id: ctx.tenantId },
+      data: { name: dto.name },
+    });
+    return { id: tenant.id, slug: tenant.slug, name: tenant.name };
   }
 
   async getMyTenant(ctx: TenantContext) {

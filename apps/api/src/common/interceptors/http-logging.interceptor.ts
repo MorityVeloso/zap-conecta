@@ -14,15 +14,16 @@ import {
 import type { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import type { Request, Response } from 'express';
+import type { TenantContext } from '../../auth/supabase-jwt.guard';
 
 @Injectable()
 export class HttpLoggingInterceptor implements NestInterceptor {
   private readonly logger = new Logger('HttpLog');
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
-    const req = context.switchToHttp().getRequest<Request & { tenantId?: string }>();
+    const req = context.switchToHttp().getRequest<Request & { tenantContext?: TenantContext }>();
     const { method, url } = req;
-    const tenantId = req.tenantId ?? '—';
+    const tenantId = req.tenantContext?.tenantId ?? '—';
     const start = Date.now();
 
     return next.handle().pipe(

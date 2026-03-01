@@ -7,7 +7,9 @@ function makeWebhooksServiceMock() {
   return {
     list: vi.fn(),
     create: vi.fn(),
-    toggleActive: vi.fn(),
+    update: vi.fn(),
+    test: vi.fn(),
+    getLogs: vi.fn(),
     delete: vi.fn(),
   } as unknown as WebhooksService;
 }
@@ -83,15 +85,31 @@ describe('WebhooksController', () => {
     ).toThrow();
   });
 
-  // ── toggle ──────────────────────────────────────────
+  // ── update (toggle via empty body) ──────────────────
 
-  it('toggle passes tenantId and webhook id', async () => {
-    vi.mocked(service.toggleActive).mockResolvedValue({ id: 'wh-1', isActive: false } as WebhookListItem);
+  it('update with empty body triggers toggle', async () => {
+    vi.mocked(service.update).mockResolvedValue({ id: 'wh-1', isActive: false } as WebhookListItem);
 
-    const result = await controller.toggle(TENANT, 'wh-1');
+    const result = await controller.update(TENANT, 'wh-1', {});
 
-    expect(service.toggleActive).toHaveBeenCalledWith('tenant-1', 'wh-1');
+    expect(service.update).toHaveBeenCalledWith('tenant-1', 'wh-1', {});
     expect(result.isActive).toBe(false);
+  });
+
+  it('update with body passes dto to service', async () => {
+    const updated = { id: 'wh-1', url: 'https://new.com/hook', isActive: true } as WebhookListItem;
+    vi.mocked(service.update).mockResolvedValue(updated);
+
+    const result = await controller.update(TENANT, 'wh-1', {
+      url: 'https://new.com/hook',
+      events: ['message.received'],
+    });
+
+    expect(service.update).toHaveBeenCalledWith('tenant-1', 'wh-1', {
+      url: 'https://new.com/hook',
+      events: ['message.received'],
+    });
+    expect(result).toEqual(updated);
   });
 
   // ── remove ──────────────────────────────────────────

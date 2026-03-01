@@ -1,4 +1,5 @@
 {
+  "exclude": ["node_modules", "dist", "vitest.config.ts", "src/__e2e__"],
   "compilerOptions": {
     "module": "commonjs",
     "declaration": true,

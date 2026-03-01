@@ -3,12 +3,13 @@ import { Link, useNavigate } from '@tanstack/react-router'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Zap, Eye, EyeOff, Mail, Lock } from 'lucide-react'
+import { Zap, Eye, EyeOff, Mail, Lock, ShieldCheck } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 
 const loginSchema = z.object({
   email: z.string().email('Email inválido'),
@@ -17,10 +18,146 @@ const loginSchema = z.object({
 
 type LoginForm = z.infer<typeof loginSchema>
 
+// ── Forgot password dialog ─────────────────────────────────────────────────
+
+function ForgotPasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [email, setEmail] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email) return
+    setLoading(true)
+    setError(null)
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/login`,
+    })
+    setLoading(false)
+    if (err) { setError(err.message); return }
+    setSent(true)
+  }
+
+  const handleClose = () => { setEmail(''); setSent(false); setError(null); onClose() }
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Recuperar senha</DialogTitle>
+        </DialogHeader>
+        {sent ? (
+          <div className="py-4 text-center space-y-2">
+            <p className="text-sm font-medium text-foreground">Email enviado!</p>
+            <p className="text-sm text-muted-foreground">
+              Verifique sua caixa de entrada e siga as instruções para redefinir sua senha.
+            </p>
+            <Button className="mt-4 w-full" onClick={handleClose}>Fechar</Button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="space-y-4 mt-2">
+              <p className="text-sm text-muted-foreground">
+                Digite seu email e enviaremos um link para redefinir sua senha.
+              </p>
+              {error && (
+                <div role="alert" className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
+                  {error}
+                </div>
+              )}
+              <div>
+                <Label htmlFor="reset-email">Email</Label>
+                <Input id="reset-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@empresa.com" autoComplete="email" className="mt-1.5" required />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={handleClose}>Cancelar</Button>
+              <Button type="submit" loading={loading} disabled={!email}>Enviar link</Button>
+            </DialogFooter>
+          </form>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── MFA challenge dialog ───────────────────────────────────────────────────
+
+function MfaChallengeDialog({
+  open,
+  factorId,
+  onVerified,
+  onCancel,
+}: {
+  open: boolean
+  factorId: string
+  onVerified: () => void
+  onCancel: () => void
+}) {
+  const [code, setCode] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleVerify = async () => {
+    if (code.length !== 6) return
+    setLoading(true)
+    setError(null)
+    const { error: err } = await supabase.auth.mfa.challengeAndVerify({ factorId, code })
+    setLoading(false)
+    if (err) { setError('Código inválido. Tente novamente.'); return }
+    onVerified()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onCancel}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldCheck className="w-5 h-5 text-primary" aria-hidden="true" />
+            Verificação em dois fatores
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <p className="text-sm text-muted-foreground">
+            Digite o código de 6 dígitos do seu app autenticador para continuar.
+          </p>
+          {error && (
+            <p className="text-sm text-destructive bg-destructive/10 rounded-lg px-3 py-2">{error}</p>
+          )}
+          <div>
+            <Label htmlFor="mfa-code">Código</Label>
+            <Input
+              id="mfa-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="000000"
+              className="mt-1.5 font-mono tracking-widest text-center text-lg"
+              maxLength={6}
+              autoFocus
+              onKeyDown={(e) => { if (e.key === 'Enter') handleVerify() }}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onCancel}>Cancelar</Button>
+          <Button onClick={handleVerify} loading={loading} disabled={code.length !== 6}>
+            Verificar
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Login page ─────────────────────────────────────────────────────────────
+
 export function LoginPage() {
   const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
+  const [forgotOpen, setForgotOpen] = useState(false)
+  const [mfaFactorId, setMfaFactorId] = useState<string | null>(null)
 
   const {
     register,
@@ -42,6 +179,14 @@ export function LoginPage() {
           : 'Erro ao fazer login. Tente novamente.',
       )
       return
+    }
+
+    // Check if MFA is required
+    const { data: aal } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
+    if (aal && aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2') {
+      const { data: factorsData } = await supabase.auth.mfa.listFactors()
+      const factor = factorsData?.totp?.find((f) => f.status === 'verified')
+      if (factor) { setMfaFactorId(factor.id); return }
     }
 
     await navigate({ to: '/dashboard' })
@@ -70,10 +215,7 @@ export function LoginPage() {
           <form onSubmit={handleSubmit(onSubmit)} noValidate>
             <CardContent className="space-y-4">
               {serverError && (
-                <div
-                  role="alert"
-                  className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2.5 text-sm text-destructive"
-                >
+                <div role="alert" className="rounded-lg bg-destructive/10 border border-destructive/20 px-3 py-2.5 text-sm text-destructive">
                   {serverError}
                 </div>
               )}
@@ -90,19 +232,15 @@ export function LoginPage() {
                   aria-describedby={errors.email ? 'email-error' : undefined}
                   {...register('email')}
                 />
-                {errors.email && (
-                  <p id="email-error" className="text-xs text-destructive" role="alert">
-                    {errors.email.message}
-                  </p>
-                )}
+                {errors.email && <p id="email-error" className="text-xs text-destructive" role="alert">{errors.email.message}</p>}
               </div>
 
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password">Senha</Label>
-                  <span className="text-xs text-muted-foreground">
+                  <button type="button" onClick={() => setForgotOpen(true)} className="text-xs text-primary hover:underline">
                     Esqueci a senha
-                  </span>
+                  </button>
                 </div>
                 <Input
                   id="password"
@@ -124,11 +262,7 @@ export function LoginPage() {
                   aria-describedby={errors.password ? 'password-error' : undefined}
                   {...register('password')}
                 />
-                {errors.password && (
-                  <p id="password-error" className="text-xs text-destructive" role="alert">
-                    {errors.password.message}
-                  </p>
-                )}
+                {errors.password && <p id="password-error" className="text-xs text-destructive" role="alert">{errors.password.message}</p>}
               </div>
             </CardContent>
 
@@ -146,6 +280,17 @@ export function LoginPage() {
           </form>
         </Card>
       </div>
+
+      <ForgotPasswordDialog open={forgotOpen} onClose={() => setForgotOpen(false)} />
+
+      {mfaFactorId && (
+        <MfaChallengeDialog
+          open={!!mfaFactorId}
+          factorId={mfaFactorId}
+          onVerified={() => navigate({ to: '/dashboard' })}
+          onCancel={() => { setMfaFactorId(null); supabase.auth.signOut() }}
+        />
+      )}
     </div>
   )
 }

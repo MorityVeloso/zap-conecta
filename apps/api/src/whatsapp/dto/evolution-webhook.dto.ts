@@ -154,6 +154,7 @@ export const EvolutionConnectionUpdateDataSchema = z.object({
   instance: z.string().optional(),
   state: z.enum(['open', 'close', 'connecting']),
   statusReason: z.number().optional(),
+  number: z.string().optional(), // phone number sent when state='open'
 });
 
 export const EvolutionConnectionUpdateSchema = z.object({

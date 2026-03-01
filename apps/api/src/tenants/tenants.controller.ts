@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
   Body,
   HttpCode,
   HttpStatus,
@@ -16,7 +17,7 @@ import {
 import { Public } from '../auth/public.decorator';
 import { CurrentTenant } from '../common/decorators/current-tenant.decorator';
 import type { TenantContext } from '../auth/supabase-jwt.guard';
-import { TenantsService, SignupDtoSchema } from './tenants.service';
+import { TenantsService, SignupDtoSchema, UpdateTenantDtoSchema } from './tenants.service';
 
 @ApiTags('Tenants')
 @ApiBearerAuth()
@@ -48,6 +49,15 @@ export class TenantsController {
   @ApiResponse({ status: 200, description: 'Uso atual' })
   async getUsage(@CurrentTenant() ctx: TenantContext) {
     return this.tenantsService.getUsage(ctx);
+  }
+
+  @Patch('me')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Atualizar dados do tenant' })
+  @ApiResponse({ status: 200, description: 'Tenant atualizado' })
+  async updateMe(@CurrentTenant() ctx: TenantContext, @Body() body: unknown) {
+    const dto = UpdateTenantDtoSchema.parse(body);
+    return this.tenantsService.updateTenant(ctx, dto);
   }
 
   @Get('stats')

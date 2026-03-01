@@ -12,6 +12,8 @@ import type {
   WhatsAppMessageReceivedEvent,
   WhatsAppMessageSentEvent,
   WhatsAppMessageStatusEvent,
+  WhatsAppInstanceConnectedEvent,
+  WhatsAppInstanceDisconnectedEvent,
 } from './whatsapp.events';
 import type { WebhookDeliveryJobData } from './webhook-delivery.processor';
 import { QUEUE_WEBHOOK_DELIVERY } from '../queue/queue.constants';
@@ -59,6 +61,23 @@ export class WebhookDispatcherService {
       messageId: event.messageId,
       status: event.status,
       phone: event.phone,
+    });
+  }
+
+  @OnEvent('whatsapp.instance.connected', { async: true })
+  async onInstanceConnected(event: WhatsAppInstanceConnectedEvent): Promise<void> {
+    await this.dispatch(event.tenantId, 'instance.connected', {
+      tenantSlug: event.tenantSlug,
+      instanceId: event.instanceId,
+      phone: event.phone,
+    });
+  }
+
+  @OnEvent('whatsapp.instance.disconnected', { async: true })
+  async onInstanceDisconnected(event: WhatsAppInstanceDisconnectedEvent): Promise<void> {
+    await this.dispatch(event.tenantId, 'instance.disconnected', {
+      tenantSlug: event.tenantSlug,
+      instanceId: event.instanceId,
     });
   }
 

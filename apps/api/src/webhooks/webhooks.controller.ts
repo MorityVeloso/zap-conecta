@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -22,6 +23,12 @@ const CreateWebhookSchema = z.object({
     .array(z.enum(WEBHOOK_EVENTS))
     .min(1, 'Selecione pelo menos um evento'),
 });
+
+const UpdateWebhookSchema = z.object({
+  url: z.string().url('URL inválida').optional(),
+  events: z.array(z.enum(WEBHOOK_EVENTS)).min(1).optional(),
+  isActive: z.boolean().optional(),
+}).strict();
 
 @ApiTags('Webhooks')
 @ApiSecurity('x-api-key')
@@ -48,13 +55,39 @@ export class WebhooksController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Toggle webhook active/inactive' })
+  @ApiOperation({ summary: 'Update webhook (url, events, isActive); empty body = toggle active' })
   @ApiResponse({ status: 200 })
-  toggle(
+  update(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    const dto = body && typeof body === 'object' && Object.keys(body).length > 0
+      ? UpdateWebhookSchema.parse(body)
+      : {};
+    return this.webhooksService.update(tenant.tenantId, id, dto);
+  }
+
+  @Post(':id/test')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Send a test ping to the webhook URL' })
+  @ApiResponse({ status: 200 })
+  test(
     @CurrentTenant() tenant: TenantContext,
     @Param('id') id: string,
   ) {
-    return this.webhooksService.toggleActive(tenant.tenantId, id);
+    return this.webhooksService.test(tenant.tenantId, id);
+  }
+
+  @Get(':id/logs')
+  @ApiOperation({ summary: 'Get delivery logs for a webhook' })
+  @ApiResponse({ status: 200 })
+  getLogs(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.webhooksService.getLogs(tenant.tenantId, id, limit ? parseInt(limit, 10) : 20);
   }
 
   @Delete(':id')

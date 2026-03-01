@@ -6,7 +6,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { Request } from 'express';
 
 export interface SupabaseUser {
@@ -31,8 +31,14 @@ declare module 'express' {
 @Injectable()
 export class SupabaseJwtGuard implements CanActivate {
   private readonly logger = new Logger(SupabaseJwtGuard.name);
+  private readonly supabase: SupabaseClient;
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(private readonly configService: ConfigService) {
+    this.supabase = createClient(
+      this.configService.getOrThrow<string>('SUPABASE_URL'),
+      this.configService.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY'),
+    );
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
@@ -44,10 +50,7 @@ export class SupabaseJwtGuard implements CanActivate {
 
     const token = authHeader.slice(7);
 
-    const supabase = createClient(
-      this.configService.getOrThrow<string>('SUPABASE_URL'),
-      this.configService.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY'),
-    );
+    const supabase = this.supabase;
 
     const { data: { user }, error } = await supabase.auth.getUser(token);
 

@@ -1,5 +1,18 @@
 /** Shared event payload types for WhatsApp EventEmitter2 events. */
 
+export interface WhatsAppInstanceConnectedEvent {
+  tenantId: string;
+  tenantSlug: string;
+  instanceId?: string;
+  phone?: string;
+}
+
+export interface WhatsAppInstanceDisconnectedEvent {
+  tenantId: string;
+  tenantSlug: string;
+  instanceId?: string;
+}
+
 export interface WhatsAppMessageReceivedEvent {
   tenantId: string;
   instanceId: string;

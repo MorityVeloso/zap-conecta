@@ -13,7 +13,9 @@ import {
   Zap,
   ChevronRight,
   LogOut,
+  X,
 } from 'lucide-react'
+import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { cn } from '@/lib/utils'
 import { Badge } from '@/components/ui/badge'
 import { supabase } from '@/lib/supabase'
@@ -44,9 +46,20 @@ const bottomItems: NavItem[] = [
 interface SidebarProps {
   tenantName?: string
   planName?: string
+  /** Mobile drawer: controlled open state */
+  mobileOpen?: boolean
+  onMobileClose?: () => void
 }
 
-export function Sidebar({ tenantName = 'Minha Empresa', planName = 'Free' }: SidebarProps) {
+function SidebarContent({
+  tenantName,
+  planName,
+  onClose,
+}: {
+  tenantName: string
+  planName: string
+  onClose?: () => void
+}) {
   const routerState = useRouterState()
   const pathname = routerState.location.pathname
 
@@ -61,21 +74,28 @@ export function Sidebar({ tenantName = 'Minha Empresa', planName = 'Free' }: Sid
   }
 
   return (
-    <aside
-      className="flex h-screen w-[var(--sidebar-width)] flex-col border-r border-sidebar-border bg-[hsl(var(--sidebar-bg))] text-[hsl(var(--sidebar-fg))]"
-      aria-label="Navegação principal"
-    >
+    <div className="flex h-full flex-col">
       {/* Logo */}
-      <div className="flex h-14 items-center gap-2.5 px-4 border-b border-[hsl(var(--sidebar-border))]">
-        <div className="flex size-8 items-center justify-center rounded-lg gradient-brand shadow-lg shadow-primary/30">
-          <Zap className="size-4 text-white" aria-hidden="true" />
+      <div className="flex h-14 items-center justify-between gap-2.5 px-4 border-b border-[hsl(var(--sidebar-border))]">
+        <div className="flex items-center gap-2.5">
+          <div className="flex size-8 items-center justify-center rounded-lg gradient-brand shadow-lg shadow-primary/30">
+            <Zap className="size-4 text-white" aria-hidden="true" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-bold tracking-tight">Zap-Conecta</span>
+            <span className="text-[10px] text-[hsl(var(--sidebar-muted))] font-medium uppercase tracking-wider">API WhatsApp</span>
+          </div>
         </div>
-        <div className="flex flex-col">
-          <span className="text-sm font-bold tracking-tight">Zap-Conecta</span>
-          <span className="text-[10px] text-[hsl(var(--sidebar-muted))] font-medium uppercase tracking-wider">
-            API WhatsApp
-          </span>
-        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[hsl(var(--sidebar-muted))] hover:text-[hsl(var(--sidebar-fg))] lg:hidden"
+            aria-label="Fechar menu"
+          >
+            <X className="size-5" aria-hidden="true" />
+          </button>
+        )}
       </div>
 
       {/* Tenant info */}
@@ -91,18 +111,16 @@ export function Sidebar({ tenantName = 'Minha Empresa', planName = 'Free' }: Sid
 
       {/* Navigation */}
       <nav className="flex flex-1 flex-col gap-0.5 px-3 py-3 overflow-y-auto" aria-label="Menu principal">
-        <p className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--sidebar-muted))]">
-          Geral
-        </p>
+        <p className="px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-[hsl(var(--sidebar-muted))]">Geral</p>
         {navItems.map((item) => (
-          <NavLink key={item.href} item={item} active={isActive(item.href)} />
+          <NavLink key={item.href} item={item} active={isActive(item.href)} onClick={onClose} />
         ))}
       </nav>
 
       {/* Bottom items */}
       <div className="border-t border-[hsl(var(--sidebar-border))] px-3 py-3 space-y-0.5">
         {bottomItems.map((item) => (
-          <NavLink key={item.href} item={item} active={isActive(item.href)} />
+          <NavLink key={item.href} item={item} active={isActive(item.href)} onClick={onClose} />
         ))}
         <button
           onClick={handleSignOut}
@@ -113,17 +131,54 @@ export function Sidebar({ tenantName = 'Minha Empresa', planName = 'Free' }: Sid
           <span>Sair</span>
         </button>
       </div>
-    </aside>
+    </div>
   )
 }
 
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
+export function Sidebar({ tenantName = 'Minha Empresa', planName = 'Free', mobileOpen, onMobileClose }: SidebarProps) {
+  return (
+    <>
+      {/* Desktop: always visible */}
+      <aside
+        className="hidden lg:flex h-screen w-[var(--sidebar-width)] flex-col border-r border-sidebar-border bg-[hsl(var(--sidebar-bg))] text-[hsl(var(--sidebar-fg))]"
+        aria-label="Navegação principal"
+      >
+        <SidebarContent tenantName={tenantName} planName={planName} />
+      </aside>
+
+      {/* Mobile: Radix Dialog drawer */}
+      <DialogPrimitive.Root open={mobileOpen} onOpenChange={(v) => !v && onMobileClose?.()}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/50 lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0" />
+          <DialogPrimitive.Content
+            className="fixed inset-y-0 left-0 z-50 w-[var(--sidebar-width)] bg-[hsl(var(--sidebar-bg))] text-[hsl(var(--sidebar-fg))] shadow-xl lg:hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left"
+            aria-label="Menu mobile"
+          >
+            <DialogPrimitive.Title className="sr-only">Menu de navegação</DialogPrimitive.Title>
+            <SidebarContent tenantName={tenantName} planName={planName} onClose={onMobileClose} />
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
+    </>
+  )
+}
+
+function NavLink({
+  item,
+  active,
+  onClick,
+}: {
+  item: NavItem
+  active: boolean
+  onClick?: () => void
+}) {
   const Icon = item.icon
   return (
     <Link
       to={item.href}
+      onClick={onClick}
       className={cn(
-        'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all',
+        'relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all',
         active
           ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-fg))] font-medium shadow-sm'
           : 'text-[hsl(var(--sidebar-muted))] hover:bg-[hsl(var(--sidebar-accent))]/60 hover:text-[hsl(var(--sidebar-fg))]',
@@ -138,10 +193,7 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
         </Badge>
       )}
       {active && (
-        <span
-          className="absolute left-0 h-6 w-1 rounded-r-full bg-primary"
-          aria-hidden="true"
-        />
+        <span className="absolute left-0 h-6 w-1 rounded-r-full bg-primary" aria-hidden="true" />
       )}
     </Link>
   )

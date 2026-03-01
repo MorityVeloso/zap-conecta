@@ -60,6 +60,11 @@ export interface SubscribeDto {
   billingType: AsaasBillingType;
 }
 
+export interface ChangePlanDto {
+  planName: string;
+  billingType?: AsaasBillingType;
+}
+
 export interface SubscriptionResult {
   asaasSubscriptionId: string;
   status: string;
@@ -223,6 +228,75 @@ export class BillingService {
     ]);
 
     this.logger.log(`Subscription cancelled: tenant=${tenantId}`);
+  }
+
+  async changePlan(tenantId: string, dto: ChangePlanDto): Promise<SubscriptionResult> {
+    const plan = await this.prisma.plan.findFirst({
+      where: { name: dto.planName, isActive: true },
+    });
+    if (!plan) throw new NotFoundException(`Plano '${dto.planName}' não encontrado`);
+    if (plan.priceBrlCents === 0) throw new BadRequestException('Para fazer downgrade, cancele sua assinatura');
+
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
+    if (!sub) throw new NotFoundException('Nenhuma assinatura encontrada');
+
+    const apiKey = this.asaasApiKey();
+
+    // Cancel existing Asaas subscription
+    if (sub.asaasSubscriptionId) {
+      await this.deleteAsaasSubscription(apiKey, sub.asaasSubscriptionId);
+    }
+
+    // Create new Asaas subscription (reuse existing customer)
+    const customerId = sub.asaasCustomerId;
+    if (!customerId) throw new BadRequestException('Dados de cobrança não encontrados. Recadastre o CPF.');
+
+    const priceInBrl = plan.priceBrlCents / 100;
+    const asaasSub = await this.createAsaasSubscription(
+      apiKey,
+      customerId,
+      tenantId,
+      priceInBrl,
+      plan.displayName,
+      dto.billingType ?? 'PIX',
+    );
+
+    await this.prisma.$transaction([
+      this.prisma.subscription.update({
+        where: { tenantId },
+        data: {
+          planId: plan.id,
+          asaasSubscriptionId: asaasSub.id,
+          status: SubscriptionStatus.TRIALING,
+          cancelledAt: null,
+        },
+      }),
+      this.prisma.tenant.update({
+        where: { id: tenantId },
+        data: { planId: plan.id },
+      }),
+    ]);
+
+    this.logger.log(`Plan changed: tenant=${tenantId} newPlan=${dto.planName} asaas=${asaasSub.id}`);
+
+    return { asaasSubscriptionId: asaasSub.id, status: asaasSub.status, nextDueDate: asaasSub.nextDueDate };
+  }
+
+  async getPayments(tenantId: string): Promise<unknown[]> {
+    const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
+    if (!sub?.asaasSubscriptionId) return [];
+
+    const apiKey = this.asaasApiKey();
+    const url = `${this.asaasBaseUrl()}/payments?subscription=${sub.asaasSubscriptionId}&limit=10`;
+    const res = await fetch(url, { headers: { 'access_token': apiKey } });
+
+    if (!res.ok) {
+      this.logger.warn(`Failed to fetch Asaas payments: ${res.status}`);
+      return [];
+    }
+
+    const data = await res.json() as { data?: unknown[] };
+    return data.data ?? [];
   }
 
   // ── Webhook handler ───────────────────────────────────────────

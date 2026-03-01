@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Zap, Check, ArrowRight, CreditCard, Calendar, AlertCircle } from 'lucide-react'
+import { Zap, Check, ArrowRight, CreditCard, Calendar, AlertCircle, ChevronDown } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -40,13 +40,18 @@ interface SubscribeResult {
   nextDueDate: string
 }
 
+interface AsaasPayment {
+  id: string
+  status: string
+  value: number
+  dueDate: string
+  paymentDate?: string
+  billingType: string
+}
+
 function formatPrice(cents: number): string {
   if (cents === 0) return 'Grátis'
   return `R$ ${(cents / 100).toFixed(0)}/mês`
-}
-
-function currentPlanPrice(planName: string, plans: Plan[]): number {
-  return plans.find((p) => p.name === planName)?.priceBrlCents ?? 0
 }
 
 const PLAN_FEATURES: Record<string, string[]> = {
@@ -55,16 +60,26 @@ const PLAN_FEATURES: Record<string, string[]> = {
   pro: ['30.000 mensagens/mês', '10 números WhatsApp', 'API Keys ilimitadas', 'Suporte dedicado', 'SLA 99.9%'],
 }
 
-// ── Subscribe Modal ──────────────────────────────────────────────────────────
+const PAYMENT_STATUS_BADGE: Record<string, { label: string; variant: 'success' | 'warning' | 'destructive' | 'secondary' }> = {
+  RECEIVED: { label: 'Pago', variant: 'success' },
+  CONFIRMED: { label: 'Confirmado', variant: 'success' },
+  PENDING: { label: 'Pendente', variant: 'warning' },
+  OVERDUE: { label: 'Em atraso', variant: 'destructive' },
+  REFUNDED: { label: 'Estornado', variant: 'secondary' },
+}
+
+// ── Subscribe / Change Plan Modal ─────────────────────────────────────────
 
 function SubscribeModal({
   plan,
   open,
+  isChangePlan,
   onClose,
   onSuccess,
 }: {
   plan: Plan
   open: boolean
+  isChangePlan: boolean
   onClose: () => void
   onSuccess: (result: SubscribeResult) => void
 }) {
@@ -72,13 +87,17 @@ function SubscribeModal({
   const [cpf, setCpf] = useState('')
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api.post<SubscribeResult>('/billing/subscribe', {
+    mutationFn: () => {
+      if (isChangePlan) {
+        return api.patch<SubscribeResult>('/billing/subscription', { planName: plan.name })
+      }
+      return api.post<SubscribeResult>('/billing/subscribe', {
         planName: plan.name,
         customerName: customerName.trim(),
         cpf: cpf.replace(/\D/g, ''),
         billingType: 'PIX',
-      }),
+      })
+    },
     onSuccess: (data) => {
       onSuccess(data)
       onClose()
@@ -97,52 +116,67 @@ function SubscribeModal({
   }
 
   const cpfDigits = cpf.replace(/\D/g, '')
-  const canSubmit = customerName.trim().length >= 2 && cpfDigits.length === 11
+  const canSubmit = isChangePlan || (customerName.trim().length >= 2 && cpfDigits.length === 11)
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Assinar plano {plan.displayName}</DialogTitle>
+          <DialogTitle>{isChangePlan ? 'Alterar para' : 'Assinar'} plano {plan.displayName}</DialogTitle>
           <DialogDescription>
             {formatPrice(plan.priceBrlCents)} · pagamento via PIX (recorrente mensal)
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          <div>
-            <Label htmlFor="sub-name">Nome completo</Label>
-            <Input
-              id="sub-name"
-              placeholder="Seu nome ou da empresa"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
-              className="mt-1.5"
-              autoFocus
-            />
-          </div>
-          <div>
-            <Label htmlFor="sub-cpf">CPF</Label>
-            <Input
-              id="sub-cpf"
-              placeholder="000.000.000-00"
-              value={cpf}
-              onChange={(e) => setCpf(formatCpf(e.target.value))}
-              className="mt-1.5"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Necessário para emissão da cobrança via PIX
-            </p>
-          </div>
+          {!isChangePlan && (
+            <>
+              <div>
+                <Label htmlFor="sub-name">Nome completo</Label>
+                <Input
+                  id="sub-name"
+                  placeholder="Seu nome ou da empresa"
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  className="mt-1.5"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <Label htmlFor="sub-cpf">CPF</Label>
+                <Input
+                  id="sub-cpf"
+                  placeholder="000.000.000-00"
+                  value={cpf}
+                  onChange={(e) => setCpf(formatCpf(e.target.value))}
+                  className="mt-1.5"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Necessário para emissão da cobrança via PIX
+                </p>
+              </div>
+            </>
+          )}
 
-          <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm">
-            <p className="font-medium text-foreground">Como funciona</p>
-            <ol className="list-decimal list-inside text-muted-foreground mt-1.5 space-y-1">
-              <li>Confirme os dados e clique em assinar</li>
-              <li>Um PIX será gerado e enviado automaticamente</li>
-              <li>Após o pagamento, seu plano é ativado automaticamente</li>
-            </ol>
-          </div>
+          {isChangePlan && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 px-4 py-3 text-sm">
+              <p className="font-medium text-foreground">Trocar de plano</p>
+              <p className="text-muted-foreground mt-1">
+                Sua assinatura atual será cancelada e uma nova cobrança via PIX será gerada para o plano {plan.displayName}.
+              </p>
+            </div>
+          )}
+
+          {!isChangePlan && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm">
+              <p className="font-medium text-foreground">Como funciona</p>
+              <ol className="list-decimal list-inside text-muted-foreground mt-1.5 space-y-1">
+                <li>Confirme os dados e clique em assinar</li>
+                <li>Um PIX será gerado e enviado automaticamente</li>
+                <li>Após o pagamento, seu plano é ativado automaticamente</li>
+              </ol>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -153,11 +187,101 @@ function SubscribeModal({
             loading={mutation.isPending}
             disabled={!canSubmit}
           >
-            Assinar plano {plan.displayName}
+            {isChangePlan ? 'Confirmar troca' : `Assinar plano ${plan.displayName}`}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ── Cancel confirmation ───────────────────────────────────────────────────
+
+function CancelConfirmDialog({
+  open,
+  onClose,
+  onConfirm,
+  loading,
+}: {
+  open: boolean
+  onClose: () => void
+  onConfirm: () => void
+  loading: boolean
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Cancelar assinatura</DialogTitle>
+          <DialogDescription>
+            Tem certeza que deseja cancelar? Seu plano será rebaixado para Free ao final do período.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Manter assinatura</Button>
+          <Button variant="destructive" onClick={onConfirm} loading={loading}>
+            Cancelar assinatura
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Payment history ───────────────────────────────────────────────────────
+
+function PaymentHistory() {
+  const [open, setOpen] = useState(false)
+  const { data: payments = [], isLoading } = useQuery({
+    queryKey: ['billing', 'payments'],
+    queryFn: () => api.get<AsaasPayment[]>('/billing/payments'),
+    enabled: open,
+  })
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+      >
+        <Calendar className="w-4 h-4" />
+        Histórico de pagamentos
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <Card className="mt-3 overflow-hidden">
+          {isLoading ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">Carregando…</div>
+          ) : payments.length === 0 ? (
+            <div className="px-4 py-6 text-center text-sm text-muted-foreground">Nenhum pagamento encontrado</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {payments.map((p) => {
+                const badge = PAYMENT_STATUS_BADGE[p.status] ?? { label: p.status, variant: 'secondary' as const }
+                return (
+                  <div key={p.id} className="flex items-center justify-between px-4 py-3">
+                    <div>
+                      <p className="text-sm font-medium">
+                        R$ {p.value.toFixed(2).replace('.', ',')}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Vencimento: {new Date(p.dueDate).toLocaleDateString('pt-BR')}
+                        {p.paymentDate && (
+                          <> · Pago em: {new Date(p.paymentDate).toLocaleDateString('pt-BR')}</>
+                        )}
+                      </p>
+                    </div>
+                    <Badge variant={badge.variant}>{badge.label}</Badge>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
   )
 }
 
@@ -167,6 +291,7 @@ export function BillingPage() {
   const queryClient = useQueryClient()
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null)
   const [subscribeResult, setSubscribeResult] = useState<SubscribeResult | null>(null)
+  const [cancelOpen, setCancelOpen] = useState(false)
 
   const { data: tenant } = useQuery({
     queryKey: ['tenant', 'me'],
@@ -187,6 +312,7 @@ export function BillingPage() {
     mutationFn: () => api.delete<void>('/billing/subscription'),
     onSuccess: () => {
       toast.success('Assinatura cancelada')
+      setCancelOpen(false)
       void queryClient.invalidateQueries({ queryKey: ['billing'] })
       void queryClient.invalidateQueries({ queryKey: ['tenant'] })
     },
@@ -197,6 +323,8 @@ export function BillingPage() {
 
   const currentPlanName = tenant?.plan?.name?.toLowerCase() ?? 'free'
   const sub = subscriptionData?.subscription
+  const hasActiveSub = sub && sub.status !== 'CANCELLED'
+  const isChangePlan = hasActiveSub && sub.status === 'ACTIVE'
 
   const STATUS_BADGE = {
     ACTIVE: { label: 'Ativo', variant: 'success' as const },
@@ -204,6 +332,11 @@ export function BillingPage() {
     PAST_DUE: { label: 'Pagamento atrasado', variant: 'destructive' as const },
     CANCELLED: { label: 'Cancelado', variant: 'secondary' as const },
     PAUSED: { label: 'Pausado', variant: 'secondary' as const },
+  }
+
+  const invalidateAll = () => {
+    void queryClient.invalidateQueries({ queryKey: ['billing'] })
+    void queryClient.invalidateQueries({ queryKey: ['tenant'] })
   }
 
   return (
@@ -237,7 +370,7 @@ export function BillingPage() {
       )}
 
       {/* Current plan card */}
-      <Card className="p-5 mb-8 flex items-center justify-between">
+      <Card className="p-5 mb-6 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
             <Zap className="w-5 h-5 text-primary" />
@@ -275,27 +408,23 @@ export function BillingPage() {
             <CreditCard className="w-4 h-4 mr-1.5" />
             Método de pagamento
           </Button>
-          <Button variant="outline" size="sm" disabled>
-            <Calendar className="w-4 h-4 mr-1.5" />
-            Histórico
-          </Button>
-          {sub && sub.status !== 'CANCELLED' && currentPlanName !== 'free' && (
+          {hasActiveSub && currentPlanName !== 'free' && (
             <Button
               variant="ghost"
               size="sm"
               className="text-destructive hover:text-destructive"
-              onClick={() => {
-                if (confirm('Tem certeza que deseja cancelar a assinatura?')) {
-                  cancelMutation.mutate()
-                }
-              }}
-              loading={cancelMutation.isPending}
+              onClick={() => setCancelOpen(true)}
             >
               Cancelar
             </Button>
           )}
         </div>
       </Card>
+
+      {/* Payment history */}
+      <div className="mb-8">
+        <PaymentHistory />
+      </div>
 
       {/* Plans grid */}
       <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-4">
@@ -310,7 +439,8 @@ export function BillingPage() {
           const isCurrent = plan.name === currentPlanName
           const isHighlight = plan.name === 'starter'
           const features = PLAN_FEATURES[plan.name] ?? []
-          const isUpgrade = plan.priceBrlCents > currentPlanPrice(currentPlanName, plans)
+          const currentCents = plans.find((p) => p.name === currentPlanName)?.priceBrlCents ?? 0
+          const isUpgrade = plan.priceBrlCents > currentCents
 
           return (
             <div
@@ -375,19 +505,27 @@ export function BillingPage() {
         Pagamentos processados com segurança via Asaas · PIX recorrente mensal · Cancele a qualquer momento
       </p>
 
-      {/* Subscribe modal */}
+      {/* Subscribe / change plan modal */}
       {selectedPlan && (
         <SubscribeModal
           plan={selectedPlan}
           open
+          isChangePlan={!!isChangePlan}
           onClose={() => setSelectedPlan(null)}
           onSuccess={(result) => {
             setSubscribeResult(result)
-            void queryClient.invalidateQueries({ queryKey: ['billing'] })
-            void queryClient.invalidateQueries({ queryKey: ['tenant'] })
+            invalidateAll()
           }}
         />
       )}
+
+      {/* Cancel confirmation */}
+      <CancelConfirmDialog
+        open={cancelOpen}
+        onClose={() => setCancelOpen(false)}
+        onConfirm={() => cancelMutation.mutate()}
+        loading={cancelMutation.isPending}
+      />
     </div>
   )
 }

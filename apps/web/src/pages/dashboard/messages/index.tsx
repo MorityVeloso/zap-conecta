@@ -1,9 +1,17 @@
-import { MessageSquare, Send, Download, Loader2 } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useRef, useEffect } from 'react'
+import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText } from 'lucide-react'
+import { useQuery, useMutation } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { cn } from '@/lib/utils'
 import { formatRelativeTime, formatPhone } from '@/lib/utils'
+
+// ── Types ──────────────────────────────────────────────────────────────────
 
 interface ConversationSummary {
   phone: string
@@ -13,6 +21,243 @@ interface ConversationSummary {
   lastStatus: string
 }
 
+interface Message {
+  id: string
+  phone: string
+  type: string
+  direction: 'INBOUND' | 'OUTBOUND'
+  content: { text?: string; url?: string; caption?: string; fileName?: string }
+  createdAt: string
+  status?: string
+}
+
+// ── Export CSV ─────────────────────────────────────────────────────────────
+
+function exportConversationsCSV(conversations: ConversationSummary[]) {
+  const header = 'phone,direction,message,at'
+  const rows = conversations.map(
+    (c) =>
+      `${c.phone},${c.lastDirection},"${c.lastMessage.replace(/"/g, '""')}",${c.lastAt}`,
+  )
+  const csv = [header, ...rows].join('\n')
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'conversas.csv'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+// ── Conversation thread ────────────────────────────────────────────────────
+
+type SendType = 'text' | 'image' | 'document'
+
+function ConversationThread({ phone }: { phone: string }) {
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [sendType, setSendType] = useState<SendType>('text')
+  const [text, setText] = useState('')
+  const [mediaUrl, setMediaUrl] = useState('')
+  const [caption, setCaption] = useState('')
+  const [fileName, setFileName] = useState('')
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['messages', 'thread', phone],
+    queryFn: () =>
+      api.get<{ data: Message[] }>(`/messages?phone=${encodeURIComponent(phone)}&limit=50`),
+    refetchInterval: 10_000,
+  })
+
+  const messages = data?.data ?? []
+
+  // Scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages.length])
+
+  const sendMutation = useMutation({
+    mutationFn: async () => {
+      if (sendType === 'text') {
+        if (!text.trim()) return
+        await api.post('/whatsapp/send/text', { phone, message: text.trim() })
+      } else if (sendType === 'image') {
+        if (!mediaUrl) return
+        await api.post('/whatsapp/send/image', { phone, image: mediaUrl, caption: caption || undefined })
+      } else {
+        if (!mediaUrl || !fileName) return
+        await api.post('/whatsapp/send/document', { phone, document: mediaUrl, fileName, caption: caption || undefined })
+      }
+    },
+    onSuccess: () => {
+      setText('')
+      setMediaUrl('')
+      setCaption('')
+      setFileName('')
+    },
+    onError: () => toast.error('Falha ao enviar mensagem'),
+  })
+
+  const handleSend = (e: React.FormEvent) => {
+    e.preventDefault()
+    sendMutation.mutate()
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-border bg-card">
+        <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold">
+          {formatPhone(phone).slice(0, 2).toUpperCase()}
+        </div>
+        <div>
+          <p className="text-sm font-medium">{formatPhone(phone)}</p>
+          <p className="text-xs text-muted-foreground font-mono">{phone}</p>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-2">
+        {isLoading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center gap-2 py-12">
+            <MessageSquare className="w-8 h-8 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">Nenhuma mensagem ainda</p>
+          </div>
+        ) : (
+          messages.map((msg) => {
+            const isOut = msg.direction === 'OUTBOUND'
+            const text = msg.content?.text ?? msg.content?.caption ?? `[${msg.type}]`
+            return (
+              <div key={msg.id} className={cn('flex gap-2 max-w-[80%]', isOut ? 'ml-auto flex-row-reverse' : '')}>
+                <div
+                  className={cn(
+                    'flex size-6 shrink-0 items-center justify-center rounded-full text-white text-[10px] mt-1',
+                    isOut ? 'bg-primary' : 'bg-emerald-500',
+                  )}
+                  aria-hidden="true"
+                >
+                  {isOut ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+                </div>
+                <div
+                  className={cn(
+                    'rounded-2xl px-3 py-2 text-sm',
+                    isOut
+                      ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                      : 'bg-muted text-foreground rounded-tl-sm',
+                  )}
+                >
+                  <p>{text}</p>
+                  <p className={cn('text-[10px] mt-0.5', isOut ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
+                    {formatRelativeTime(msg.createdAt)}
+                  </p>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* Send form */}
+      <div className="border-t border-border bg-card p-3">
+        {/* Type tabs */}
+        <div className="flex gap-1 mb-2">
+          {(['text', 'image', 'document'] as SendType[]).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setSendType(t)}
+              className={cn(
+                'flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
+                sendType === t
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:bg-muted',
+              )}
+            >
+              {t === 'text' && <MessageSquare className="size-3" />}
+              {t === 'image' && <Image className="size-3" />}
+              {t === 'document' && <FileText className="size-3" />}
+              {t === 'text' ? 'Texto' : t === 'image' ? 'Imagem' : 'Documento'}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleSend} className="space-y-2">
+          {sendType === 'text' && (
+            <div className="flex gap-2">
+              <Input
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Digite uma mensagem…"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    sendMutation.mutate()
+                  }
+                }}
+              />
+              <Button type="submit" size="sm" disabled={!text.trim() || sendMutation.isPending}>
+                <Send className="size-4" />
+              </Button>
+            </div>
+          )}
+          {(sendType === 'image' || sendType === 'document') && (
+            <>
+              <div>
+                <Label className="text-xs">URL da {sendType === 'image' ? 'imagem' : 'arquivo'}</Label>
+                <Input
+                  value={mediaUrl}
+                  onChange={(e) => setMediaUrl(e.target.value)}
+                  placeholder={sendType === 'image' ? 'https://…/imagem.jpg' : 'https://…/arquivo.pdf'}
+                  className="mt-1"
+                />
+              </div>
+              {sendType === 'document' && (
+                <div>
+                  <Label className="text-xs">Nome do arquivo</Label>
+                  <Input
+                    value={fileName}
+                    onChange={(e) => setFileName(e.target.value)}
+                    placeholder="documento.pdf"
+                    className="mt-1"
+                  />
+                </div>
+              )}
+              <div>
+                <Label className="text-xs">Legenda (opcional)</Label>
+                <div className="flex gap-2 mt-1">
+                  <Input
+                    value={caption}
+                    onChange={(e) => setCaption(e.target.value)}
+                    placeholder="Adicione uma legenda…"
+                  />
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={
+                      !mediaUrl ||
+                      (sendType === 'document' && !fileName) ||
+                      sendMutation.isPending
+                    }
+                  >
+                    <Send className="size-4" />
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// ── Main page ──────────────────────────────────────────────────────────────
+
 function InitialsAvatar({ name }: { name: string }) {
   const initials = name
     .split(' ')
@@ -20,7 +265,6 @@ function InitialsAvatar({ name }: { name: string }) {
     .map((w) => w[0])
     .join('')
     .toUpperCase()
-
   return (
     <div className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold shrink-0">
       {initials || '?'}
@@ -29,88 +273,96 @@ function InitialsAvatar({ name }: { name: string }) {
 }
 
 export function MessagesPage() {
+  const [selectedPhone, setSelectedPhone] = useState<string | null>(null)
+
   const { data: conversations = [], isLoading } = useQuery({
     queryKey: ['messages', 'conversations'],
     queryFn: () => api.get<ConversationSummary[]>('/messages/conversations'),
+    refetchInterval: 15_000,
   })
 
   return (
-    <div className="p-6 max-w-4xl">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Mensagens</h1>
-          <p className="text-muted-foreground mt-0.5 text-sm">
-            Histórico de conversas por número
-          </p>
+    <div className="flex h-[calc(100vh-3.5rem)] overflow-hidden">
+      {/* Left: conversation list */}
+      <div className="w-[320px] shrink-0 flex flex-col border-r border-border bg-card overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h1 className="text-base font-semibold">Mensagens</h1>
+          <button
+            type="button"
+            onClick={() => exportConversationsCSV(conversations)}
+            disabled={conversations.length === 0}
+            className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Exportar CSV"
+          >
+            <Download className="w-3.5 h-3.5" />
+            CSV
+          </button>
         </div>
-      </div>
 
-      {isLoading ? (
-        <div className="flex items-center gap-2 text-muted-foreground py-12 justify-center">
-          <Loader2 className="w-5 h-5 animate-spin" />
-          <span>Carregando...</span>
-        </div>
-      ) : conversations.length === 0 ? (
-        <Card className="p-12 flex flex-col items-center text-center">
-          <div className="w-14 h-14 bg-muted rounded-2xl flex items-center justify-center mb-4">
-            <MessageSquare className="w-7 h-7 text-muted-foreground" />
-          </div>
-          <h3 className="font-semibold text-foreground">Nenhuma conversa ainda</h3>
-          <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-            As conversas aparecerão aqui quando mensagens forem enviadas ou recebidas
-          </p>
-        </Card>
-      ) : (
-        <Card>
-          <div className="divide-y divide-border">
-            <div className="px-4 py-2.5 flex items-center justify-between">
-              <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Conversas recentes · {conversations.length}
-              </span>
-              <button className="text-xs text-primary hover:underline flex items-center gap-1">
-                <Download className="w-3 h-3" />
-                Exportar
-              </button>
+        <div className="flex-1 overflow-y-auto">
+          {isLoading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
             </div>
-
-            {conversations.map((conv) => (
-              <div
+          ) : conversations.length === 0 ? (
+            <div className="flex flex-col items-center text-center px-6 py-12 gap-2">
+              <MessageSquare className="w-8 h-8 text-muted-foreground/30" />
+              <p className="text-sm font-medium">Nenhuma conversa ainda</p>
+              <p className="text-xs text-muted-foreground">As conversas aparecem aqui após enviar ou receber mensagens</p>
+            </div>
+          ) : (
+            conversations.map((conv) => (
+              <button
                 key={conv.phone}
-                className="flex items-center gap-3 px-4 py-3.5 hover:bg-muted/30 transition-colors cursor-pointer"
+                type="button"
+                onClick={() => setSelectedPhone(conv.phone)}
+                className={cn(
+                  'w-full flex items-center gap-3 px-4 py-3.5 transition-colors text-left',
+                  selectedPhone === conv.phone
+                    ? 'bg-primary/10 border-r-2 border-primary'
+                    : 'hover:bg-muted/30',
+                )}
               >
                 <InitialsAvatar name={formatPhone(conv.phone)} />
-
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-foreground truncate">
+                    <span className="font-medium text-sm text-foreground truncate">
                       {formatPhone(conv.phone)}
                     </span>
-                    <span className="text-xs text-muted-foreground shrink-0">
+                    <span className="text-[10px] text-muted-foreground shrink-0">
                       {formatRelativeTime(new Date(conv.lastAt))}
                     </span>
                   </div>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    {conv.lastDirection === 'OUTBOUND' && (
-                      <Send className="w-3 h-3 text-muted-foreground shrink-0" />
-                    )}
-                    <p className="text-sm text-muted-foreground truncate">{conv.lastMessage}</p>
-                  </div>
-                  <p className="text-xs text-muted-foreground/60 mt-0.5 font-mono text-[10px]">
-                    {conv.phone}
-                  </p>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{conv.lastMessage}</p>
                 </div>
-
                 <Badge
-                  variant={conv.lastDirection === 'INBOUND' ? 'secondary' : 'outline'}
-                  className="shrink-0 text-[10px]"
+                  variant={conv.lastDirection === 'INBOUND' ? 'success' : 'outline'}
+                  className="shrink-0 text-[10px] h-4 px-1"
                 >
-                  {conv.lastDirection === 'INBOUND' ? 'recebida' : 'enviada'}
+                  {conv.lastDirection === 'INBOUND' ? '↓' : '↑'}
                 </Badge>
-              </div>
-            ))}
+              </button>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Right: thread or empty state */}
+      <div className="flex-1 overflow-hidden">
+        {selectedPhone ? (
+          <ConversationThread key={selectedPhone} phone={selectedPhone} />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-3 text-center">
+            <Card className="p-8 flex flex-col items-center gap-3">
+              <MessageSquare className="w-10 h-10 text-muted-foreground/30" />
+              <p className="font-medium text-foreground">Selecione uma conversa</p>
+              <p className="text-sm text-muted-foreground max-w-xs">
+                Escolha uma conversa na lista para visualizar as mensagens e enviar respostas
+              </p>
+            </Card>
           </div>
-        </Card>
-      )}
+        )}
+      </div>
     </div>
   )
 }
