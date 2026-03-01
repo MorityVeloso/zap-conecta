@@ -15,31 +15,23 @@ export function ResetPasswordPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
-  const [isRecovery, setIsRecovery] = useState(false)
+  const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === 'PASSWORD_RECOVERY') {
-        setIsRecovery(true)
-      }
-    })
-    return () => subscription.unsubscribe()
-  }, [])
-
-  // Also check hash for recovery type (in case event already fired)
-  useEffect(() => {
-    const hash = window.location.hash
-    if (hash.includes('type=recovery') || hash.includes('type=magiclink')) {
-      setIsRecovery(true)
-    }
-    // If no recovery token after 3s, redirect to login
-    const timer = setTimeout(() => {
-      if (!isRecovery) {
+    // Wait for Supabase to process the hash and establish session
+    const check = async () => {
+      // Give Supabase a moment to process the URL hash fragment
+      await new Promise((r) => setTimeout(r, 500))
+      const { data } = await supabase.auth.getSession()
+      if (data.session) {
+        setReady(true)
+      } else {
+        // No session = user navigated here directly without a recovery link
         void navigate({ to: '/auth/login' })
       }
-    }, 3000)
-    return () => clearTimeout(timer)
-  }, [isRecovery, navigate])
+    }
+    void check()
+  }, [navigate])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -67,7 +59,7 @@ export function ResetPasswordPage() {
     setTimeout(() => { void navigate({ to: '/dashboard' }) }, 2000)
   }
 
-  if (!isRecovery) {
+  if (!ready) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-accent/30 p-4">
         <p className="text-muted-foreground text-sm">Verificando link de recuperação...</p>

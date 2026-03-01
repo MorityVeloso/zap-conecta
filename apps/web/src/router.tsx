@@ -45,10 +45,13 @@ async function requireAuth() {
 }
 
 async function redirectIfAuthed() {
-  // Don't redirect if this is a password recovery callback
+  // Don't redirect if this is a password recovery callback —
+  // let Supabase JS process the hash first, then redirect cleanly
   const hash = window.location.hash
   if (hash.includes('type=recovery')) {
-    throw redirect({ to: '/auth/reset-password', hash })
+    // Wait for Supabase to process the hash and create session
+    await new Promise((r) => setTimeout(r, 1000))
+    throw redirect({ to: '/auth/reset-password' })
   }
   const { data } = await supabase.auth.getSession()
   if (data.session) {
