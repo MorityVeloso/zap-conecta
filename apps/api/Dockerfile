@@ -1,4 +1,4 @@
-FROM node:18-slim AS builder
+FROM node:20-slim AS builder
 
 WORKDIR /app
 
@@ -6,9 +6,10 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
 # Copy package files and install deps
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY .npmrc ./
-RUN npm install
+RUN npm install --ignore-scripts
+RUN npm rebuild
 
 # Copy prisma schema and generate client
 COPY prisma ./prisma
@@ -19,15 +20,16 @@ COPY . .
 RUN npm run build
 
 # --- Production stage ---
-FROM node:18-slim
+FROM node:20-slim
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 
-COPY package.json package-lock.json ./
+COPY package.json ./
 COPY .npmrc ./
-RUN npm install --omit=dev
+RUN npm install --omit=dev --ignore-scripts
+RUN npm rebuild
 
 # Copy prisma schema + generated client
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
