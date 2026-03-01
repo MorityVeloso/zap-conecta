@@ -8,14 +8,18 @@ import {
 } from '@tanstack/react-router'
 import { supabase } from '@/lib/supabase'
 
-// Layouts
-import { DashboardLayout } from '@/components/layout/dashboard-layout'
-
-// Pages
+// Pages (eager — auth entry points)
 import { LoginPage } from '@/pages/auth/login'
 import { SignupPage } from '@/pages/auth/signup'
 import { ResetPasswordPage } from '@/pages/auth/reset-password'
-import { DashboardPage } from '@/pages/dashboard'
+
+// Lazy loaded layout + dashboard
+const DashboardLayout = React.lazy(() =>
+  import('@/components/layout/dashboard-layout').then((m) => ({ default: m.DashboardLayout })),
+)
+const DashboardPage = React.lazy(() =>
+  import('@/pages/dashboard').then((m) => ({ default: m.DashboardPage })),
+)
 
 // ─── Root ─────────────────────────────────────────────────────────────────
 

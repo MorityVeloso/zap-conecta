@@ -1,5 +1,4 @@
 import React from 'react'
-import { useQuery } from '@tanstack/react-query'
 import {
   MessageSquare,
   Smartphone,
@@ -8,39 +7,18 @@ import {
   ArrowUpRight,
   ArrowDownRight,
 } from 'lucide-react'
-import { api } from '@/lib/api'
 import { useTenant } from '@/hooks/use-tenant'
+import { useDashboardStats } from '@/hooks/use-dashboard-stats'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { formatRelativeTime } from '@/lib/utils'
 import { Link } from '@tanstack/react-router'
 
-interface DashboardStats {
-  messagesSentThisMonth: number
-  messagesReceivedThisMonth: number
-  activeInstances: number
-  totalInstances: number
-  messagesLimit: number
-  usagePercent: number
-  recentMessages: Array<{
-    id: string
-    phone: string
-    type: string
-    direction: 'INBOUND' | 'OUTBOUND'
-    content: { text?: string }
-    createdAt: string
-  }>
-}
-
 export function DashboardPage() {
   const { tenant } = useTenant()
 
-  const { data: stats, isLoading } = useQuery({
-    queryKey: ['dashboard', 'stats'],
-    queryFn: () => api.get<DashboardStats>('/tenants/stats'),
-    refetchInterval: 30_000, // atualiza a cada 30s
-  })
+  const { data: stats, isLoading } = useDashboardStats()
 
   const usagePercent = stats?.usagePercent ?? 0
   const usageColor =

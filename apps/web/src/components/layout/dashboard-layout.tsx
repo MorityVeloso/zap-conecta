@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { Outlet } from '@tanstack/react-router'
 import { Bell, MessageSquare, ArrowDownRight, ArrowUpRight, Sun, Moon, Menu } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
 import { Sidebar } from './sidebar'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -9,24 +8,11 @@ import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover
 import { useTenant } from '@/hooks/use-tenant'
 import { useAuth } from '@/hooks/use-auth'
 import { useTheme } from '@/contexts/theme-context'
-import { api } from '@/lib/api'
+import { useDashboardStats } from '@/hooks/use-dashboard-stats'
 import { formatRelativeTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
 const SEEN_KEY = 'zc_notifications_seen_at'
-
-interface RecentMessage {
-  id: string
-  phone: string
-  type: string
-  direction: 'INBOUND' | 'OUTBOUND'
-  content: { text?: string; caption?: string }
-  createdAt: string
-}
-
-interface DashboardStats {
-  recentMessages: RecentMessage[]
-}
 
 function NotificationsBell() {
   const [open, setOpen] = useState(false)
@@ -34,11 +20,7 @@ function NotificationsBell() {
     return parseInt(localStorage.getItem(SEEN_KEY) ?? '0', 10)
   })
 
-  const { data } = useQuery({
-    queryKey: ['dashboard-stats'],
-    queryFn: () => api.get<DashboardStats>('/tenants/stats'),
-    refetchInterval: 30_000,
-  })
+  const { data } = useDashboardStats()
 
   const messages = data?.recentMessages ?? []
   const unseenCount = messages.filter((m) => new Date(m.createdAt).getTime() > seenAt).length
