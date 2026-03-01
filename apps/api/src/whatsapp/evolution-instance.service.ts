@@ -184,7 +184,21 @@ export class EvolutionInstanceService {
       where: { tenantSlug },
     });
 
-    if (existing) return existing as WhatsAppInstance;
+    if (existing) {
+      // Verify the instance still exists on Evolution API (may have been lost on redeploy)
+      const existsOnEvolution = await this.instanceExistsOnEvolutionApi(
+        existing.instanceName,
+      );
+
+      if (!existsOnEvolution) {
+        this.logger.warn(
+          `Instance ${existing.instanceName} exists in DB but not on Evolution API — re-creating`,
+        );
+        await this.recreateOnEvolutionApi(existing.instanceName, tenantSlug);
+      }
+
+      return existing as WhatsAppInstance;
+    }
 
     await this.createInstance(tenantSlug, tenantId);
 
@@ -193,6 +207,65 @@ export class EvolutionInstanceService {
     });
 
     return created as WhatsAppInstance;
+  }
+
+  /** Check if an instance exists on Evolution API without throwing */
+  private async instanceExistsOnEvolutionApi(
+    instanceName: string,
+  ): Promise<boolean> {
+    try {
+      await this.makeRequest(
+        `/instance/connectionState/${instanceName}`,
+        'GET',
+      );
+      return true;
+    } catch (error) {
+      if (error instanceof EvolutionApiException && error.upstreamStatus === 404) {
+        return false;
+      }
+      // For other errors (network, 500, etc.), assume it exists to avoid recreating
+      this.logger.warn(
+        `Could not verify instance ${instanceName} on Evolution API: ${String(error)}`,
+      );
+      return true;
+    }
+  }
+
+  /** Re-create an instance on Evolution API (DB record already exists) */
+  private async recreateOnEvolutionApi(
+    instanceName: string,
+    tenantSlug: string,
+  ): Promise<void> {
+    const webhookUrl = this.buildWebhookUrl(tenantSlug);
+
+    const createResponse = await this.makeRequest<{
+      instance?: { instanceName?: string };
+      hash?: Record<string, string>;
+    }>('/instance/create', 'POST', {
+      instanceName,
+      integration: 'WHATSAPP-BAILEYS',
+      qrcode: true,
+      webhook: {
+        url: webhookUrl,
+        byEvents: false,
+        base64: false,
+        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'],
+      },
+    });
+
+    const instanceToken = createResponse.hash?.apikey ?? null;
+
+    await this.prisma.whatsAppInstance.updateMany({
+      where: { instanceName },
+      data: {
+        instanceToken,
+        status: WhatsAppInstanceStatus.DISCONNECTED,
+        webhookUrl,
+        phone: null,
+      },
+    });
+
+    this.logger.log(`Instance re-created on Evolution API: ${instanceName}`);
   }
 
   async getInstance(tenantSlug: string): Promise<WhatsAppInstance> {
