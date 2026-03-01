@@ -45,6 +45,11 @@ async function requireAuth() {
 }
 
 async function redirectIfAuthed() {
+  // Don't redirect if this is a password recovery callback
+  const hash = window.location.hash
+  if (hash.includes('type=recovery')) {
+    throw redirect({ to: '/auth/reset-password', hash })
+  }
   const { data } = await supabase.auth.getSession()
   if (data.session) {
     throw redirect({ to: '/dashboard' })
