@@ -2,11 +2,12 @@ FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Install OpenSSL for Prisma
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+# Install OpenSSL for Prisma + pin npm to stable version
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/* \
+    && npm install -g npm@10.2.4
 
 # Copy package files and install deps
-COPY package*.json ./
+COPY package.json package-lock.json ./
 COPY .npmrc ./
 RUN npm ci
 
@@ -23,9 +24,10 @@ FROM node:20-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/* \
+    && npm install -g npm@10.2.4
 
-COPY package*.json ./
+COPY package.json package-lock.json ./
 COPY .npmrc ./
 RUN npm ci --omit=dev
 
