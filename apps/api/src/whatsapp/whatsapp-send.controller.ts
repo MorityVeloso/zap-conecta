@@ -32,7 +32,7 @@ import type {
   CheckNumberDto,
   ReadMessagesDto,
 } from './dto/message.dto';
-import type { BulkSendDto } from './dto/bulk.dto';
+import { BulkSendDtoSchema, type BulkSendDto } from './dto/bulk.dto';
 import type { BulkSendJobData } from './bulk-send.processor';
 import { QUEUE_BULK_SEND } from '../queue/queue.constants';
 import { EvolutionInstanceService } from './evolution-instance.service';
@@ -255,8 +255,9 @@ export class WhatsAppSendController {
   @ApiResponse({ status: 201, description: 'Bulk send enqueued' })
   async sendBulk(
     @CurrentTenant() tenant: TenantContext,
-    @Body() dto: BulkSendDto,
+    @Body() body: unknown,
   ): Promise<{ batchId: string; total: number }> {
+    const dto = BulkSendDtoSchema.parse(body);
     await this.usageService.assertBelowQuota(tenant.tenantId);
 
     const batchId = crypto.randomUUID();
