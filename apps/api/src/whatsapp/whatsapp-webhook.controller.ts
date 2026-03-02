@@ -152,29 +152,34 @@ export class WhatsAppWebhookController {
           this.logger.warn(`Invalid connection.update payload: ${parsed.error.message}`);
           return;
         }
-        this.logger.log(`Connection update: state=${parsed.data.state}`);
+        const state = parsed.data.state;
+        this.logger.log(`Connection update: state=${state}`);
+
+        // Only persist terminal states (open / close) — ignore transient "connecting"
+        if (state !== 'open' && state !== 'close') break;
+
         const inst = await this.evolutionInstanceService.findByTenant(tenantSlug);
         if (inst) {
-          const newStatus = parsed.data.state === 'open' ? 'CONNECTED' : 'DISCONNECTED';
+          const newStatus = state === 'open' ? 'CONNECTED' : 'DISCONNECTED';
           await this.prisma.whatsAppInstance.update({
             where: { id: inst.id },
             data: {
               status: newStatus,
-              ...(parsed.data.state === 'open' && parsed.data.number
+              ...(state === 'open' && parsed.data.number
                 ? { phone: parsed.data.number }
                 : {}),
             },
           });
           this.logger.log(`Instance ${inst.instanceName} status updated to ${newStatus}`);
 
-          if (parsed.data.state === 'open') {
+          if (state === 'open') {
             this.eventEmitter.emit('whatsapp.instance.connected', {
               tenantId: inst.tenantId,
               tenantSlug,
               instanceId: inst.id,
               phone: parsed.data.number ?? undefined,
             });
-          } else if (parsed.data.state === 'close') {
+          } else {
             this.eventEmitter.emit('whatsapp.instance.disconnected', {
               tenantId: inst.tenantId,
               tenantSlug,

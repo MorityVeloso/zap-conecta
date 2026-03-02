@@ -196,7 +196,12 @@ export class WhatsAppConnectionController {
         const state = await this.evolutionInstanceService.getConnectionStatusForInstance(instanceName);
         if (!state.connected) {
           this.logger.warn(`QR timeout: disconnecting idle instance ${instanceName}`);
-          await this.evolutionInstanceService.disconnectInstance(instanceName);
+          try {
+            await this.evolutionInstanceService.disconnectInstance(instanceName);
+          } catch {
+            // Instance may already be disconnected — safe to ignore
+            this.logger.log(`QR timeout: instance ${instanceName} already disconnected`);
+          }
         }
       } catch (err) {
         this.logger.error(`QR timeout cleanup failed for ${instanceName}: ${String(err)}`);
