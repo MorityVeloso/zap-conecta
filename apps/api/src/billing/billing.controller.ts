@@ -108,11 +108,11 @@ export class BillingController {
     @Body() payload: AsaasWebhookPayload,
     @Headers('asaas-access-token') headerToken?: string,
   ): Promise<{ received: boolean }> {
-    // Validate webhook token (body or header)
+    // Validate webhook token (body or header — reject if missing or wrong)
     const expectedToken = this.config.get<string>('ASAAS_WEBHOOK_TOKEN');
     const receivedToken = payload.accessToken ?? headerToken;
-    if (expectedToken && receivedToken && receivedToken !== expectedToken) {
-      this.logger.warn('Asaas webhook: invalid accessToken');
+    if (expectedToken && receivedToken !== expectedToken) {
+      this.logger.warn('Asaas webhook: invalid or missing accessToken');
       throw new UnauthorizedException('Invalid webhook token');
     }
 
