@@ -31,9 +31,10 @@ describe('WebhooksService', () => {
   // ── list ────────────────────────────────────────────
 
   describe('list', () => {
-    it('returns webhooks for tenant ordered by createdAt desc', async () => {
+    it('returns paginated webhooks for tenant ordered by createdAt desc', async () => {
       const webhooks = [{ id: 'wh-1' }, { id: 'wh-2' }];
       vi.mocked(prisma.webhook.findMany).mockResolvedValue(webhooks as never);
+      vi.mocked(prisma.webhook.count).mockResolvedValue(2);
 
       const result = await service.list(TENANT_ID);
 
@@ -41,8 +42,13 @@ describe('WebhooksService', () => {
         where: { tenantId: TENANT_ID },
         select: expect.objectContaining({ id: true, url: true, events: true, isActive: true }),
         orderBy: { createdAt: 'desc' },
+        skip: 0,
+        take: 20,
       });
-      expect(result).toEqual(webhooks);
+      expect(prisma.webhook.count).toHaveBeenCalledWith({
+        where: { tenantId: TENANT_ID },
+      });
+      expect(result).toEqual({ data: webhooks, total: 2, page: 1, limit: 20 });
     });
   });
 

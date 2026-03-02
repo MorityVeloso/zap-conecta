@@ -144,17 +144,19 @@ describe('ApiKeysService', () => {
 
   // ── list ────────────────────────────────────────────────────
 
-  it('lists API keys without exposing hashes', async () => {
-    // Prisma `select` excludes keyHash — mock returns only selected fields
+  it('lists API keys without exposing hashes (paginated)', async () => {
     vi.mocked(prisma.apiKey.findMany).mockResolvedValue([
       { id: 'k1', name: 'Key 1', keyPrefix: 'zc_live_abcde123', createdAt: new Date(), lastUsedAt: null, expiresAt: null, revokedAt: null },
     ] as never);
+    vi.mocked(prisma.apiKey.count).mockResolvedValue(1);
 
-    const keys = await service.list('tenant-1');
+    const result = await service.list('tenant-1');
 
-    expect(keys).toHaveLength(1);
-    expect(keys[0]).not.toHaveProperty('keyHash');
-    expect(keys[0]).toHaveProperty('keyPrefix', 'zc_live_abcde123');
+    expect(result.data).toHaveLength(1);
+    expect(result.data[0]).not.toHaveProperty('keyHash');
+    expect(result.data[0]).toHaveProperty('keyPrefix', 'zc_live_abcde123');
+    expect(result.total).toBe(1);
+    expect(result.page).toBe(1);
   });
 
   // ── revoke ──────────────────────────────────────────────────

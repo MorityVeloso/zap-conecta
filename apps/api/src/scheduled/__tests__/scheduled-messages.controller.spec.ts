@@ -76,14 +76,14 @@ describe('ScheduledMessagesController', () => {
 
   // ── list ────────────────────────────────────────────
 
-  it('list passes tenantId to service', async () => {
-    const messages = [{ id: 'sched-1' }, { id: 'sched-2' }];
-    vi.mocked(scheduledService.list).mockResolvedValue(messages as never);
+  it('list passes tenantId with default pagination to service', async () => {
+    const paginated = { data: [{ id: 'sched-1' }, { id: 'sched-2' }], total: 2, page: 1, limit: 20 };
+    vi.mocked(scheduledService.list).mockResolvedValue(paginated as never);
 
     const result = await controller.list(TENANT);
 
-    expect(scheduledService.list).toHaveBeenCalledWith('tenant-1');
-    expect(result).toEqual(messages);
+    expect(scheduledService.list).toHaveBeenCalledWith('tenant-1', 1, 20);
+    expect(result).toEqual(paginated);
   });
 
   // ── cancel ──────────────────────────────────────────

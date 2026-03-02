@@ -63,19 +63,27 @@ export class WebhooksService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async list(tenantId: string): Promise<WebhookListItem[]> {
-    return this.prisma.webhook.findMany({
-      where: { tenantId },
-      select: {
-        id: true,
-        url: true,
-        events: true,
-        isActive: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  async list(tenantId: string, page = 1, limit = 20): Promise<{ data: WebhookListItem[]; total: number; page: number; limit: number }> {
+    const where = { tenantId };
+    const [data, total] = await Promise.all([
+      this.prisma.webhook.findMany({
+        where,
+        select: {
+          id: true,
+          url: true,
+          events: true,
+          isActive: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.webhook.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   async create(

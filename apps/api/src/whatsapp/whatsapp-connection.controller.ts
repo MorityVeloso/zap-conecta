@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Query,
   HttpCode,
   HttpStatus,
   HttpException,
@@ -40,8 +41,13 @@ export class WhatsAppConnectionController {
   @Get('status')
   @ApiOperation({ summary: 'Get WhatsApp connection status' })
   @ApiResponse({ status: 200, description: 'Connection status retrieved' })
-  async getStatus(@CurrentTenant() tenant: TenantContext) {
-    const instance = await this.evolutionInstanceService.findByTenant(tenant.tenantSlug);
+  async getStatus(
+    @CurrentTenant() tenant: TenantContext,
+    @Query('instanceId') instanceId?: string,
+  ) {
+    const instance = instanceId
+      ? await this.evolutionInstanceService.findById(instanceId)
+      : await this.evolutionInstanceService.findByTenant(tenant.tenantSlug);
 
     if (!instance) {
       return { status: 'DISCONNECTED' as const, instanceConfigured: false };
@@ -51,19 +57,19 @@ export class WhatsAppConnectionController {
 
     if (connectionStatus.connected) {
       this.clearQrTimeout(instance.instanceName);
-      return { status: 'CONNECTED' as const, phone: connectionStatus.phone, instanceConfigured: true };
+      return { status: 'CONNECTED' as const, phone: connectionStatus.phone, instanceConfigured: true, instanceId: instance.id };
     }
 
     try {
       const qrData = await this.evolutionInstanceService.getQrCodeForInstance(instance.instanceName);
       if (qrData.imageBase64 ?? qrData.qrcode) {
-        return { status: 'QR_CODE' as const, qrCode: qrData.imageBase64 ?? qrData.qrcode, instanceConfigured: true };
+        return { status: 'QR_CODE' as const, qrCode: qrData.imageBase64 ?? qrData.qrcode, instanceConfigured: true, instanceId: instance.id };
       }
     } catch {
       // QR not available yet
     }
 
-    return { status: 'DISCONNECTED' as const, instanceConfigured: true };
+    return { status: 'DISCONNECTED' as const, instanceConfigured: true, instanceId: instance.id };
   }
 
   @Get('qr-code')
@@ -79,10 +85,19 @@ export class WhatsAppConnectionController {
   @ApiOperation({ summary: 'Connect WhatsApp instance (get QR code + pairing code)' })
   @ApiResponse({ status: 200, description: 'QR code and/or pairing code returned' })
   @ApiResponse({ status: 429, description: 'Too many connection attempts' })
-  async connect(@CurrentTenant() tenant: TenantContext) {
+  async connect(
+    @CurrentTenant() tenant: TenantContext,
+    @Query('instanceId') instanceId?: string,
+  ) {
     this.enforceRateLimit(tenant.tenantSlug);
 
-    const instance = await this.evolutionInstanceService.getOrCreateInstance(tenant.tenantSlug, tenant.tenantId);
+    let instance;
+    if (instanceId) {
+      instance = await this.evolutionInstanceService.findById(instanceId);
+      if (!instance) throw new HttpException('Instance not found', HttpStatus.NOT_FOUND);
+    } else {
+      instance = await this.evolutionInstanceService.getOrCreateInstance(tenant.tenantSlug, tenant.tenantId);
+    }
 
     // Evolution API needs a moment to configure a newly created instance
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -109,8 +124,14 @@ export class WhatsAppConnectionController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Disconnect WhatsApp instance' })
   @ApiResponse({ status: 200, description: 'Disconnected successfully' })
-  async disconnect(@CurrentTenant() tenant: TenantContext): Promise<{ success: boolean }> {
-    const instance = await this.evolutionInstanceService.getInstance(tenant.tenantSlug);
+  async disconnect(
+    @CurrentTenant() tenant: TenantContext,
+    @Query('instanceId') instanceId?: string,
+  ): Promise<{ success: boolean }> {
+    const instance = instanceId
+      ? await this.evolutionInstanceService.findById(instanceId)
+      : await this.evolutionInstanceService.findByTenant(tenant.tenantSlug);
+    if (!instance) throw new HttpException('Instance not found', HttpStatus.NOT_FOUND);
     this.clearQrTimeout(instance.instanceName);
     await this.evolutionInstanceService.disconnectInstance(instance.instanceName);
     return { success: true };

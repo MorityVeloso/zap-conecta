@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Alert } from '@/components/ui/alert'
+import { Pagination } from '@/components/ui/pagination'
 import { formatRelativeTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
 
@@ -202,18 +203,28 @@ function WebhookFormModal({
 
 // ── Main page ──────────────────────────────────────────────────────────────
 
+interface PaginatedResponse<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
+}
+
 export function WebhooksPage() {
   const queryClient = useQueryClient()
   const [modalState, setModalState] = useState<{ open: boolean; existing?: WebhookItem }>({ open: false })
   const [createdWebhook, setCreatedWebhook] = useState<WebhookCreated | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   const toggleExpanded = (id: string) => setExpandedId((prev) => (prev === id ? null : id))
 
-  const { data: webhooks = [], isLoading } = useQuery({
-    queryKey: ['webhooks'],
-    queryFn: () => api.get<WebhookItem[]>('/webhooks'),
+  const { data: result, isLoading } = useQuery({
+    queryKey: ['webhooks', page],
+    queryFn: () => api.get<PaginatedResponse<WebhookItem>>(`/webhooks?page=${page}&limit=20`),
   })
+
+  const webhooks = result?.data ?? []
 
   const toggleMutation = useMutation({
     mutationFn: (id: string) => api.patch<WebhookItem>(`/webhooks/${id}`),
@@ -427,6 +438,9 @@ export function WebhooksPage() {
               </div>
             ))}
           </div>
+          {result && (
+            <Pagination page={result.page} limit={result.limit} total={result.total} onPageChange={setPage} />
+          )}
         </Card>
       )}
 

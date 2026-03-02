@@ -2,7 +2,7 @@
  * WhatsAppSendController — all message send endpoints.
  * Enforces per-tenant monthly quota before each send.
  */
-import { Controller, Post, Body, Inject } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import {
@@ -36,6 +36,7 @@ import { BulkSendDtoSchema, type BulkSendDto } from './dto/bulk.dto';
 import type { BulkSendJobData } from './bulk-send.processor';
 import { QUEUE_BULK_SEND } from '../queue/queue.constants';
 import { EvolutionInstanceService } from './evolution-instance.service';
+import { PrismaService } from '@/prisma/prisma.service';
 import { WhatsAppService, type MessageResult } from './whatsapp.service';
 
 /** Inject tenantSlug into DTO so EvolutionApiClient resolves the correct instance */
@@ -52,6 +53,7 @@ export class WhatsAppSendController {
     private readonly usageService: UsageService,
     private readonly evolutionInstanceService: EvolutionInstanceService,
     @InjectQueue(QUEUE_BULK_SEND) private readonly bulkQueue: Queue<BulkSendJobData>,
+    private readonly prisma: PrismaService,
   ) {}
 
   private async getInstanceId(tenantSlug: string): Promise<string> {
@@ -260,7 +262,14 @@ export class WhatsAppSendController {
     const dto = BulkSendDtoSchema.parse(body);
     await this.usageService.assertBelowQuota(tenant.tenantId);
 
-    const batchId = crypto.randomUUID();
+    const batch = await this.prisma.bulkSendBatch.create({
+      data: {
+        tenantId: tenant.tenantId,
+        total: dto.recipients.length,
+        status: 'PROCESSING',
+      },
+    });
+
     const delay = dto.delay ?? 1000;
 
     await Promise.all(
@@ -268,6 +277,7 @@ export class WhatsAppSendController {
         this.bulkQueue.add(
           'bulk-send',
           {
+            batchId: batch.id,
             tenantSlug: tenant.tenantSlug,
             phone,
             type: dto.message.type,
@@ -285,6 +295,30 @@ export class WhatsAppSendController {
       ),
     );
 
-    return { batchId, total: dto.recipients.length };
+    return { batchId: batch.id, total: dto.recipients.length };
+  }
+
+  @Get('send/bulk/:batchId')
+  @ApiOperation({ summary: 'Get bulk send batch status' })
+  @ApiResponse({ status: 200, description: 'Batch status retrieved' })
+  async getBatchStatus(
+    @CurrentTenant() tenant: TenantContext,
+    @Param('batchId') batchId: string,
+  ) {
+    const batch = await this.prisma.bulkSendBatch.findFirst({
+      where: { id: batchId, tenantId: tenant.tenantId },
+    });
+
+    if (!batch) throw new NotFoundException('Batch not found');
+
+    return {
+      id: batch.id,
+      total: batch.total,
+      sent: batch.sent,
+      failed: batch.failed,
+      status: batch.status,
+      progress: batch.total > 0 ? Math.round(((batch.sent + batch.failed) / batch.total) * 100) : 0,
+      createdAt: batch.createdAt,
+    };
   }
 }

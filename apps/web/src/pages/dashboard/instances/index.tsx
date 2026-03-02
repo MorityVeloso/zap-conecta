@@ -6,16 +6,29 @@ import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 
 type ConnectionStatus = 'CONNECTED' | 'QR_CODE' | 'DISCONNECTED'
 
-interface InstanceStatus {
+interface WhatsAppInstance {
+  id: string
+  tenantSlug: string
+  displayName: string | null
+  instanceName: string
+  status: string
+  phone: string | null
+  createdAt: string
+}
+
+interface InstanceStatusResponse {
   status: ConnectionStatus
   phone?: string
   qrCode?: string
   instanceConfigured: boolean
+  instanceId?: string
 }
 
 function QrCodeDisplay({ data }: { data: string }) {
@@ -28,7 +41,7 @@ function QrCodeDisplay({ data }: { data: string }) {
           <img src={src} alt="QR Code WhatsApp" className="w-56 h-56 object-contain" />
         </div>
         <p className="text-xs text-muted-foreground text-center max-w-[220px]">
-          Abra o WhatsApp → Dispositivos vinculados → Adicionar dispositivo
+          Abra o WhatsApp &rarr; Dispositivos vinculados &rarr; Adicionar dispositivo
         </p>
       </div>
     )
@@ -40,23 +53,210 @@ function QrCodeDisplay({ data }: { data: string }) {
   )
 }
 
+// ── Instance Card ────────────────────────────────────────────────────────────
+
+function InstanceCard({
+  instance,
+  onConnect,
+  onDisconnect,
+  onDelete,
+  isConnecting,
+  isDeleting,
+}: {
+  instance: WhatsAppInstance
+  onConnect: (id: string) => void
+  onDisconnect: (id: string) => void
+  onDelete: (id: string) => void
+  isConnecting: boolean
+  isDeleting: boolean
+}) {
+  const { data: liveStatus, refetch } = useQuery({
+    queryKey: ['whatsapp', 'status', instance.id],
+    queryFn: () => api.get<InstanceStatusResponse>(`/whatsapp/status?instanceId=${instance.id}`),
+    refetchInterval: false,
+  })
+
+  const isConnected = liveStatus?.status === 'CONNECTED'
+  const hasQr = liveStatus?.status === 'QR_CODE'
+  const displayName = instance.displayName ?? instance.instanceName
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-3">
+          <div className={`
+            w-10 h-10 rounded-lg flex items-center justify-center
+            ${isConnected ? 'bg-green-500/10 text-green-500' : 'bg-muted text-muted-foreground'}
+          `}>
+            {isConnected ? <Smartphone className="w-5 h-5" /> : <WifiOff className="w-5 h-5" />}
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold text-foreground text-sm">{displayName}</span>
+              <Badge
+                variant={isConnected ? 'success' : hasQr ? 'warning' : 'secondary'}
+                dot
+              >
+                {isConnected ? 'Ativo' : hasQr ? 'Aguardando QR' : 'Desconectado'}
+              </Badge>
+            </div>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {isConnected && liveStatus?.phone
+                ? liveStatus.phone
+                : `Instância: ${instance.instanceName}`}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <Button variant="outline" size="sm" onClick={() => refetch()} aria-label="Atualizar status">
+            <RefreshCw className="w-3.5 h-3.5" />
+          </Button>
+
+          {isConnected && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onDisconnect(instance.id)}
+            >
+              <WifiOff className="w-3.5 h-3.5 mr-1" />
+              Desconectar
+            </Button>
+          )}
+
+          {!isConnected && (
+            <Button
+              size="sm"
+              onClick={() => onConnect(instance.id)}
+              loading={isConnecting}
+            >
+              <QrCode className="w-3.5 h-3.5 mr-1" />
+              Conectar
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive border-destructive/30"
+            onClick={() => onDelete(instance.id)}
+            loading={isDeleting}
+            aria-label="Excluir instância"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      {isConnected && (
+        <div className="mt-3 pt-3 border-t border-border flex items-center gap-2 text-xs text-muted-foreground">
+          <Wifi className="w-3.5 h-3.5 text-green-500" />
+          <span>WhatsApp Web conectado e ativo</span>
+        </div>
+      )}
+    </Card>
+  )
+}
+
+// ── Create instance modal ────────────────────────────────────────────────────
+
+function CreateInstanceModal({
+  open,
+  onClose,
+}: {
+  open: boolean
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [displayName, setDisplayName] = useState('')
+
+  const createMutation = useMutation({
+    mutationFn: () => api.post('/whatsapp/instance/create', { displayName: displayName.trim() || undefined }),
+    onSuccess: () => {
+      toast.success('Instância criada!')
+      setDisplayName('')
+      onClose()
+      void queryClient.invalidateQueries({ queryKey: ['whatsapp', 'instances'] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Erro ao criar instância')
+    },
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) { setDisplayName(''); onClose() } }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Nova instância WhatsApp</DialogTitle>
+          <DialogDescription>
+            Adicione um novo número ao seu painel
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="py-2">
+          <Label htmlFor="inst-name">Nome da instância (opcional)</Label>
+          <Input
+            id="inst-name"
+            placeholder="Ex: Vendas, Suporte, Marketing..."
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') createMutation.mutate()
+            }}
+            className="mt-1.5"
+            autoFocus
+          />
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => { setDisplayName(''); onClose() }}>
+            Cancelar
+          </Button>
+          <Button
+            variant="gradient"
+            onClick={() => createMutation.mutate()}
+            loading={createMutation.isPending}
+          >
+            Criar instância
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── Main page ────────────────────────────────────────────────────────────────
+
 export function InstancesPage() {
   const queryClient = useQueryClient()
-  const [showQrModal, setShowQrModal] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
+  const [qrModal, setQrModal] = useState<{ open: boolean; instanceId: string | null }>({ open: false, instanceId: null })
   const [pollingEnabled, setPollingEnabled] = useState(false)
 
-  const { data: status, isLoading, refetch } = useQuery({
-    queryKey: ['whatsapp', 'status'],
-    queryFn: () => api.get<InstanceStatus>('/whatsapp/status'),
+  const { data: instances = [], isLoading } = useQuery({
+    queryKey: ['whatsapp', 'instances'],
+    queryFn: () => api.get<WhatsAppInstance[]>('/whatsapp/instances'),
+  })
+
+  // Poll QR status when modal is open
+  const { data: qrStatus } = useQuery({
+    queryKey: ['whatsapp', 'status', qrModal.instanceId],
+    queryFn: () => api.get<InstanceStatusResponse>(
+      `/whatsapp/status?instanceId=${qrModal.instanceId}`,
+    ),
+    enabled: pollingEnabled && !!qrModal.instanceId,
     refetchInterval: pollingEnabled ? 3000 : false,
   })
 
   const connectMutation = useMutation({
-    mutationFn: () => api.post<InstanceStatus & { error?: string }>('/whatsapp/connect'),
-    onSuccess: (data) => {
+    mutationFn: (instanceId: string) =>
+      api.post<InstanceStatusResponse & { error?: string }>(
+        `/whatsapp/connect?instanceId=${instanceId}`,
+      ),
+    onSuccess: (data, instanceId) => {
       if (data.status === 'QR_CODE') {
-        queryClient.setQueryData(['whatsapp', 'status'], data)
-        setShowQrModal(true)
+        setQrModal({ open: true, instanceId })
         setPollingEnabled(true)
       } else if (data.error) {
         toast.error(data.error)
@@ -70,30 +270,33 @@ export function InstancesPage() {
   })
 
   const disconnectMutation = useMutation({
-    mutationFn: () => api.post<void>('/whatsapp/disconnect'),
+    mutationFn: (instanceId: string) =>
+      api.post<void>(`/whatsapp/disconnect?instanceId=${instanceId}`),
     onSuccess: () => {
-      setPollingEnabled(false)
-      void queryClient.invalidateQueries({ queryKey: ['whatsapp', 'status'] })
+      void queryClient.invalidateQueries({ queryKey: ['whatsapp'] })
     },
   })
 
   const deleteMutation = useMutation({
-    mutationFn: () => api.delete<void>('/whatsapp/instance'),
+    mutationFn: (instanceId: string) =>
+      api.delete<void>(`/whatsapp/instance/${instanceId}`),
     onSuccess: () => {
-      setPollingEnabled(false)
-      void queryClient.invalidateQueries({ queryKey: ['whatsapp', 'status'] })
+      toast.success('Instância removida')
+      void queryClient.invalidateQueries({ queryKey: ['whatsapp', 'instances'] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof Error ? err.message : 'Erro ao excluir')
     },
   })
 
+  // Close QR modal when connected
   useEffect(() => {
-    if (status?.status === 'CONNECTED') {
-      setShowQrModal(false)
+    if (qrStatus?.status === 'CONNECTED') {
+      setQrModal({ open: false, instanceId: null })
       setPollingEnabled(false)
+      void queryClient.invalidateQueries({ queryKey: ['whatsapp'] })
     }
-  }, [status?.status])
-
-  const isConnected = status?.status === 'CONNECTED'
-  const hasQr = status?.status === 'QR_CODE'
+  }, [qrStatus?.status, queryClient])
 
   return (
     <div className="p-6 max-w-3xl">
@@ -104,16 +307,13 @@ export function InstancesPage() {
             Gerencie seus números conectados à plataforma
           </p>
         </div>
-        {!isConnected && !isLoading && (
-          <Button
-            onClick={() => connectMutation.mutate()}
-            loading={connectMutation.isPending}
-            variant="gradient"
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            Conectar número
-          </Button>
-        )}
+        <Button
+          variant="gradient"
+          onClick={() => setShowCreate(true)}
+        >
+          <Plus className="w-4 h-4 mr-2" />
+          Nova instância
+        </Button>
       </div>
 
       {isLoading && (
@@ -123,91 +323,36 @@ export function InstancesPage() {
         </div>
       )}
 
-      {!isLoading && status && (
-        <Card className="p-6">
-          <div className="flex items-start justify-between">
-            <div className="flex items-center gap-4">
-              <div className={`
-                w-12 h-12 rounded-xl flex items-center justify-center
-                ${isConnected ? 'bg-green-500/10 text-green-500' : 'bg-muted text-muted-foreground'}
-              `}>
-                {isConnected ? <Smartphone className="w-6 h-6" /> : <WifiOff className="w-6 h-6" />}
-              </div>
-
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-foreground">
-                    {isConnected ? (status.phone ?? 'Conectado') : 'Não conectado'}
-                  </span>
-                  <Badge
-                    variant={isConnected ? 'success' : hasQr ? 'warning' : 'secondary'}
-                    dot
-                  >
-                    {isConnected ? 'Ativo' : hasQr ? 'Aguardando QR' : 'Desconectado'}
-                  </Badge>
-                </div>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  {isConnected
-                    ? 'Pronto para enviar e receber mensagens'
-                    : 'Escaneie o QR Code para conectar'}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => refetch()}>
-                <RefreshCw className="w-4 h-4" />
-              </Button>
-
-              {isConnected && (
-                <>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => disconnectMutation.mutate()}
-                    loading={disconnectMutation.isPending}
-                  >
-                    <WifiOff className="w-4 h-4 mr-1.5" />
-                    Desconectar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-destructive hover:text-destructive border-destructive/30"
-                    onClick={() => deleteMutation.mutate()}
-                    loading={deleteMutation.isPending}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                </>
-              )}
-
-              {!isConnected && status.instanceConfigured && (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    if (status.qrCode) {
-                      setShowQrModal(true)
-                    } else {
-                      connectMutation.mutate()
-                    }
-                  }}
-                  loading={connectMutation.isPending}
-                >
-                  <QrCode className="w-4 h-4 mr-1.5" />
-                  Ver QR Code
-                </Button>
-              )}
-            </div>
+      {!isLoading && instances.length === 0 && (
+        <Card className="p-12 flex flex-col items-center text-center">
+          <div className="w-14 h-14 bg-muted rounded-2xl flex items-center justify-center mb-4">
+            <Smartphone className="w-7 h-7 text-muted-foreground" />
           </div>
-
-          {isConnected && (
-            <div className="mt-4 pt-4 border-t border-border flex items-center gap-2 text-sm text-muted-foreground">
-              <Wifi className="w-4 h-4 text-green-500" />
-              <span>WhatsApp Web conectado e ativo</span>
-            </div>
-          )}
+          <h3 className="font-semibold text-foreground">Nenhuma instância</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+            Crie uma instância para conectar um número de WhatsApp à plataforma.
+          </p>
+          <Button variant="gradient" className="mt-4" onClick={() => setShowCreate(true)}>
+            <Plus className="w-4 h-4 mr-2" />
+            Criar primeira instância
+          </Button>
         </Card>
+      )}
+
+      {!isLoading && instances.length > 0 && (
+        <div className="space-y-3">
+          {instances.map((inst) => (
+            <InstanceCard
+              key={inst.id}
+              instance={inst}
+              onConnect={(id) => connectMutation.mutate(id)}
+              onDisconnect={(id) => disconnectMutation.mutate(id)}
+              onDelete={(id) => deleteMutation.mutate(id)}
+              isConnecting={connectMutation.isPending}
+              isDeleting={deleteMutation.isPending}
+            />
+          ))}
+        </div>
       )}
 
       {connectMutation.isError && (
@@ -218,10 +363,11 @@ export function InstancesPage() {
         </Alert>
       )}
 
+      {/* QR Code modal */}
       <Dialog
-        open={showQrModal}
+        open={qrModal.open}
         onOpenChange={(o) => {
-          setShowQrModal(o)
+          setQrModal({ open: o, instanceId: o ? qrModal.instanceId : null })
           if (!o) setPollingEnabled(false)
         }}
       >
@@ -234,8 +380,8 @@ export function InstancesPage() {
           </DialogHeader>
 
           <div className="flex flex-col items-center py-4">
-            {status?.qrCode ? (
-              <QrCodeDisplay data={status.qrCode} />
+            {qrStatus?.qrCode ? (
+              <QrCodeDisplay data={qrStatus.qrCode} />
             ) : (
               <div className="flex items-center gap-2 text-muted-foreground py-8">
                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -243,7 +389,7 @@ export function InstancesPage() {
               </div>
             )}
 
-            {pollingEnabled && status?.status !== 'CONNECTED' && (
+            {pollingEnabled && qrStatus?.status !== 'CONNECTED' && (
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-3">
                 <Loader2 className="w-3 h-3 animate-spin" />
                 <span>Aguardando conexão...</span>
@@ -252,20 +398,24 @@ export function InstancesPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowQrModal(false)}>
+            <Button variant="outline" onClick={() => setQrModal({ open: false, instanceId: null })}>
               Fechar
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => connectMutation.mutate()}
-              loading={connectMutation.isPending}
-            >
-              <RefreshCw className="w-4 h-4 mr-1.5" />
-              Atualizar QR
-            </Button>
+            {qrModal.instanceId && (
+              <Button
+                variant="outline"
+                onClick={() => connectMutation.mutate(qrModal.instanceId!)}
+                loading={connectMutation.isPending}
+              >
+                <RefreshCw className="w-4 h-4 mr-1.5" />
+                Atualizar QR
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <CreateInstanceModal open={showCreate} onClose={() => setShowCreate(false)} />
     </div>
   )
 }

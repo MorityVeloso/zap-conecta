@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Pagination } from '@/components/ui/pagination'
 import { cn } from '@/lib/utils'
 
 type ScheduledStatus = 'PENDING' | 'SENT' | 'FAILED' | 'CANCELLED'
@@ -231,14 +232,24 @@ function payloadPreview(item: ScheduledItem): string {
 
 // ── Main page ──────────────────────────────────────────────────────────────
 
+interface PaginatedResponse<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
+}
+
 export function ScheduledPage() {
   const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
+  const [page, setPage] = useState(1)
 
-  const { data: scheduled = [], isLoading } = useQuery({
-    queryKey: ['scheduled-messages'],
-    queryFn: () => api.get<ScheduledItem[]>('/whatsapp/scheduled'),
+  const { data: result, isLoading } = useQuery({
+    queryKey: ['scheduled-messages', page],
+    queryFn: () => api.get<PaginatedResponse<ScheduledItem>>(`/whatsapp/scheduled?page=${page}&limit=20`),
   })
+
+  const scheduled = result?.data ?? []
 
   const cancelMutation = useMutation({
     mutationFn: (id: string) => api.delete(`/whatsapp/scheduled/${id}`),
@@ -340,6 +351,9 @@ export function ScheduledPage() {
               )
             })}
           </div>
+          {result && (
+            <Pagination page={result.page} limit={result.limit} total={result.total} onPageChange={setPage} />
+          )}
         </Card>
       )}
 

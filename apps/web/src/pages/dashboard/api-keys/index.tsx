@@ -10,6 +10,7 @@ import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Alert } from '@/components/ui/alert'
+import { Pagination } from '@/components/ui/pagination'
 import { formatRelativeTime } from '@/lib/utils'
 
 interface ApiKey {
@@ -26,17 +27,27 @@ interface CreatedApiKey extends ApiKey {
   plainKey: string
 }
 
+interface PaginatedResponse<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
+}
+
 export function ApiKeysPage() {
   const queryClient = useQueryClient()
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newKeyName, setNewKeyName] = useState('')
   const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null)
   const [showKey, setShowKey] = useState(false)
+  const [page, setPage] = useState(1)
 
-  const { data: keys = [], isLoading } = useQuery({
-    queryKey: ['api-keys'],
-    queryFn: () => api.get<ApiKey[]>('/api-keys'),
+  const { data: result, isLoading } = useQuery({
+    queryKey: ['api-keys', page],
+    queryFn: () => api.get<PaginatedResponse<ApiKey>>(`/api-keys?page=${page}&limit=20`),
   })
+
+  const keys = result?.data ?? []
 
   const createMutation = useMutation({
     mutationFn: (name: string) => api.post<CreatedApiKey>('/api-keys', { name }),
@@ -175,6 +186,9 @@ export function ApiKeysPage() {
               </div>
             ))}
           </div>
+          {result && (
+            <Pagination page={result.page} limit={result.limit} total={result.total} onPageChange={setPage} />
+          )}
         </Card>
       )}
 

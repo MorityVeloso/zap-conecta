@@ -10,6 +10,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
 import { EvolutionApiException } from '../common/exceptions/evolution-api.exception';
 import { ConfigService } from '@nestjs/config';
 
@@ -25,6 +26,7 @@ export interface WhatsAppInstance {
   id: string;
   tenantId: string;
   tenantSlug: string;
+  displayName: string | null;
   instanceName: string;
   instanceToken: string | null;
   status: string;
@@ -101,7 +103,8 @@ export class EvolutionInstanceService {
   }
 
   buildInstanceName(tenantSlug: string): string {
-    return `tenant-${tenantSlug}`;
+    const suffix = randomBytes(3).toString('hex');
+    return `${tenantSlug}-${suffix}`;
   }
 
   buildWebhookUrl(tenantSlug: string): string {
@@ -115,22 +118,31 @@ export class EvolutionInstanceService {
     return instance as WhatsAppInstance | null;
   }
 
+  async findById(instanceId: string): Promise<WhatsAppInstance | null> {
+    const instance = await this.prisma.whatsAppInstance.findUnique({
+      where: { id: instanceId },
+    });
+    return instance as WhatsAppInstance | null;
+  }
+
+  async listByTenantId(tenantId: string): Promise<WhatsAppInstance[]> {
+    const instances = await this.prisma.whatsAppInstance.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'asc' },
+    });
+    return instances as WhatsAppInstance[];
+  }
+
   async createInstance(
     tenantSlug: string,
     tenantId: string,
+    displayName?: string,
   ): Promise<CreateInstanceResult> {
+    // Enforce plan instance limit
+    await this.assertBelowInstanceLimit(tenantId);
+
     const instanceName = this.buildInstanceName(tenantSlug);
     const webhookUrl = this.buildWebhookUrl(tenantSlug);
-
-    const existing = await this.prisma.whatsAppInstance.findFirst({
-      where: { tenantSlug },
-    });
-
-    if (existing) {
-      throw new BadRequestException(
-        'WhatsApp instance already exists for this tenant',
-      );
-    }
 
     const createResponse = await this.makeRequest<{
       instance?: {
@@ -157,6 +169,7 @@ export class EvolutionInstanceService {
       data: {
         tenantId,
         tenantSlug,
+        displayName: displayName ?? null,
         instanceName,
         instanceToken: instanceToken ?? null,
         status: WhatsAppInstanceStatus.DISCONNECTED,
@@ -174,6 +187,33 @@ export class EvolutionInstanceService {
       instanceId: record.id,
       status: record.status as WhatsAppInstanceStatus,
     };
+  }
+
+  private async assertBelowInstanceLimit(tenantId: string): Promise<void> {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { planId: true },
+    });
+
+    if (!tenant?.planId) return;
+
+    const plan = await this.prisma.plan.findUnique({
+      where: { id: tenant.planId },
+      select: { instancesLimit: true },
+    });
+
+    const limit = plan?.instancesLimit ?? 1;
+    if (limit === -1) return; // unlimited
+
+    const current = await this.prisma.whatsAppInstance.count({
+      where: { tenantId },
+    });
+
+    if (current >= limit) {
+      throw new BadRequestException(
+        `Limite de ${limit} instância(s) atingido. Faça upgrade para adicionar mais.`,
+      );
+    }
   }
 
   async getOrCreateInstance(
@@ -282,10 +322,14 @@ export class EvolutionInstanceService {
     return instance as WhatsAppInstance;
   }
 
-  async deleteInstance(tenantSlug: string): Promise<void> {
-    const instance = await this.prisma.whatsAppInstance.findFirst({
-      where: { tenantSlug },
-    });
+  async deleteInstance(tenantSlug: string, instanceId?: string): Promise<void> {
+    const instance = instanceId
+      ? await this.prisma.whatsAppInstance.findFirst({
+          where: { id: instanceId, tenantSlug },
+        })
+      : await this.prisma.whatsAppInstance.findFirst({
+          where: { tenantSlug },
+        });
 
     if (!instance) {
       throw new NotFoundException('WhatsApp instance not found');

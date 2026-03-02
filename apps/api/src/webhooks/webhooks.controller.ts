@@ -39,8 +39,16 @@ export class WebhooksController {
   @Get()
   @ApiOperation({ summary: 'List webhooks for the current tenant' })
   @ApiResponse({ status: 200 })
-  list(@CurrentTenant() tenant: TenantContext) {
-    return this.webhooksService.list(tenant.tenantId);
+  list(
+    @CurrentTenant() tenant: TenantContext,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.webhooksService.list(
+      tenant.tenantId,
+      page ? parseInt(page, 10) : 1,
+      limit ? parseInt(limit, 10) : 20,
+    );
   }
 
   @Post()

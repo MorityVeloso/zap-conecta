@@ -45,11 +45,19 @@ export class ScheduledMessagesService {
     return record;
   }
 
-  async list(tenantId: string) {
-    return this.prisma.scheduledMessage.findMany({
-      where: { tenantId },
-      orderBy: { scheduledAt: 'asc' },
-    });
+  async list(tenantId: string, page = 1, limit = 20) {
+    const where = { tenantId };
+    const [data, total] = await Promise.all([
+      this.prisma.scheduledMessage.findMany({
+        where,
+        orderBy: { scheduledAt: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.scheduledMessage.count({ where }),
+    ]);
+
+    return { data, total, page, limit };
   }
 
   async cancel(tenantId: string, id: string) {

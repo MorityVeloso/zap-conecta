@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Delete, Body, Param } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiSecurity, ApiOperation, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { CurrentTenant } from '../common/decorators/current-tenant.decorator';
 import type { TenantContext } from '../auth/supabase-jwt.guard';
@@ -30,8 +30,16 @@ export class ScheduledMessagesController {
   @Get()
   @ApiOperation({ summary: 'List scheduled messages' })
   @ApiResponse({ status: 200, description: 'Scheduled messages listed' })
-  async list(@CurrentTenant() tenant: TenantContext) {
-    return this.scheduledService.list(tenant.tenantId);
+  async list(
+    @CurrentTenant() tenant: TenantContext,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.scheduledService.list(
+      tenant.tenantId,
+      page ? parseInt(page, 10) : 1,
+      limit ? parseInt(limit, 10) : 20,
+    );
   }
 
   @Delete(':id')

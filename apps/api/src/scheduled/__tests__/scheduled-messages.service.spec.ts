@@ -12,6 +12,7 @@ function makePrismaMock() {
       findMany: vi.fn(),
       findFirst: vi.fn(),
       update: vi.fn(),
+      count: vi.fn(),
     },
   } as unknown as PrismaService;
 }
@@ -95,17 +96,23 @@ describe('ScheduledMessagesService', () => {
   // ── list ────────────────────────────────────────────
 
   describe('list', () => {
-    it('returns scheduled messages ordered by scheduledAt', async () => {
+    it('returns paginated scheduled messages ordered by scheduledAt', async () => {
       const messages = [{ id: '1' }, { id: '2' }];
       vi.mocked(prisma.scheduledMessage.findMany).mockResolvedValue(messages as never);
+      vi.mocked(prisma.scheduledMessage.count).mockResolvedValue(2);
 
       const result = await service.list(TENANT_ID);
 
       expect(prisma.scheduledMessage.findMany).toHaveBeenCalledWith({
         where: { tenantId: TENANT_ID },
         orderBy: { scheduledAt: 'asc' },
+        skip: 0,
+        take: 20,
       });
-      expect(result).toEqual(messages);
+      expect(prisma.scheduledMessage.count).toHaveBeenCalledWith({
+        where: { tenantId: TENANT_ID },
+      });
+      expect(result).toEqual({ data: messages, total: 2, page: 1, limit: 20 });
     });
   });
 

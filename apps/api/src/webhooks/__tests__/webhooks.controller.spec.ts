@@ -36,12 +36,13 @@ describe('WebhooksController', () => {
 
   it('list passes tenantId to service', async () => {
     const webhooks = [{ id: 'wh-1', url: 'https://a.com' }] as WebhookListItem[];
-    vi.mocked(service.list).mockResolvedValue(webhooks);
+    const paginated = { data: webhooks, total: 1, page: 1, limit: 20 };
+    vi.mocked(service.list).mockResolvedValue(paginated);
 
     const result = await controller.list(TENANT);
 
-    expect(service.list).toHaveBeenCalledWith('tenant-1');
-    expect(result).toEqual(webhooks);
+    expect(service.list).toHaveBeenCalledWith('tenant-1', 1, 20);
+    expect(result).toEqual(paginated);
   });
 
   // ── create ──────────────────────────────────────────

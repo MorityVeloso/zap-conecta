@@ -71,23 +71,29 @@ export class ApiKeysService {
     };
   }
 
-  /** Lists all non-revoked API keys for a tenant. Never returns keyHash. */
-  async list(tenantId: string): Promise<ApiKeyListItem[]> {
-    const keys = await this.prisma.apiKey.findMany({
-      where: { tenantId },
-      select: {
-        id: true,
-        name: true,
-        keyPrefix: true,
-        lastUsedAt: true,
-        expiresAt: true,
-        revokedAt: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+  /** Lists API keys for a tenant with optional pagination. Never returns keyHash. */
+  async list(tenantId: string, page = 1, limit = 20): Promise<{ data: ApiKeyListItem[]; total: number; page: number; limit: number }> {
+    const where = { tenantId };
+    const [data, total] = await Promise.all([
+      this.prisma.apiKey.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          keyPrefix: true,
+          lastUsedAt: true,
+          expiresAt: true,
+          revokedAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.apiKey.count({ where }),
+    ]);
 
-    return keys;
+    return { data, total, page, limit };
   }
 
   /** Revokes an API key (soft delete — sets revokedAt). */

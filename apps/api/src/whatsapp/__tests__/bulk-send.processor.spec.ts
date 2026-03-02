@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BulkSendProcessor, type BulkSendJobData } from '../bulk-send.processor';
 import type { WhatsAppService } from '../whatsapp.service';
+import type { PrismaService } from '@/prisma/prisma.service';
 import type { Job } from 'bullmq';
 
 function makeWhatsAppServiceMock() {
@@ -13,6 +14,14 @@ function makeWhatsAppServiceMock() {
   } as unknown as WhatsAppService;
 }
 
+function makePrismaMock() {
+  return {
+    bulkSendBatch: {
+      update: vi.fn().mockResolvedValue({ id: 'batch-1', sent: 1, failed: 0, total: 5 }),
+    },
+  } as unknown as PrismaService;
+}
+
 function makeJob(data: BulkSendJobData) {
   return { data } as Job<BulkSendJobData>;
 }
@@ -23,7 +32,8 @@ describe('BulkSendProcessor', () => {
 
   beforeEach(() => {
     whatsApp = makeWhatsAppServiceMock();
-    processor = new BulkSendProcessor(whatsApp);
+    const prisma = makePrismaMock();
+    processor = new BulkSendProcessor(whatsApp, prisma);
     vi.clearAllMocks();
   });
 

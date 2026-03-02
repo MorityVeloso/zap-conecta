@@ -3,6 +3,7 @@ import { WhatsAppSendController } from '../whatsapp-send.controller';
 import type { WhatsAppService, MessageResult } from '../whatsapp.service';
 import type { UsageService } from '../../billing/usage.service';
 import type { EvolutionInstanceService } from '../evolution-instance.service';
+import type { PrismaService } from '@/prisma/prisma.service';
 import type { TenantContext } from '../../auth/supabase-jwt.guard';
 import type { Queue } from 'bullmq';
 import { HttpException, HttpStatus } from '@nestjs/common';
@@ -47,6 +48,15 @@ function makeBulkQueueMock() {
   } as unknown as Queue;
 }
 
+function makePrismaMock() {
+  return {
+    bulkSendBatch: {
+      create: vi.fn().mockResolvedValue({ id: 'batch-1', total: 3, sent: 0, failed: 0, status: 'PROCESSING' }),
+      findFirst: vi.fn(),
+    },
+  } as unknown as PrismaService;
+}
+
 const TENANT: TenantContext = {
   tenantId: 'tenant-1',
   tenantSlug: 'acme',
@@ -70,7 +80,8 @@ describe('WhatsAppSendController', () => {
     usage = makeUsageServiceMock();
     evolutionInstance = makeEvolutionInstanceServiceMock();
     bulkQueue = makeBulkQueueMock();
-    controller = new WhatsAppSendController(whatsApp, usage, evolutionInstance, bulkQueue);
+    const prisma = makePrismaMock();
+    controller = new WhatsAppSendController(whatsApp, usage, evolutionInstance, bulkQueue, prisma);
     vi.clearAllMocks();
 
     // Default: allow quota

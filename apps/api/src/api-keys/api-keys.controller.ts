@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -39,8 +40,16 @@ export class ApiKeysController {
   @Get()
   @ApiOperation({ summary: 'List all API keys for the current tenant' })
   @ApiResponse({ status: 200, description: 'API keys listed (no plain values)' })
-  async list(@CurrentTenant() tenant: TenantContext) {
-    return this.apiKeysService.list(tenant.tenantId);
+  async list(
+    @CurrentTenant() tenant: TenantContext,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.apiKeysService.list(
+      tenant.tenantId,
+      page ? parseInt(page, 10) : 1,
+      limit ? parseInt(limit, 10) : 20,
+    );
   }
 
   @Delete(':id')

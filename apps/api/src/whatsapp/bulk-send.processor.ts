@@ -2,9 +2,11 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import type { Job } from 'bullmq';
 import { WhatsAppService } from './whatsapp.service';
+import { PrismaService } from '@/prisma/prisma.service';
 import { QUEUE_BULK_SEND } from '../queue/queue.constants';
 
 export interface BulkSendJobData {
+  batchId?: string;
   tenantSlug: string;
   phone: string;
   type: string;
@@ -18,12 +20,15 @@ export interface BulkSendJobData {
 export class BulkSendProcessor extends WorkerHost {
   private readonly logger = new Logger(BulkSendProcessor.name);
 
-  constructor(private readonly whatsAppService: WhatsAppService) {
+  constructor(
+    private readonly whatsAppService: WhatsAppService,
+    private readonly prisma: PrismaService,
+  ) {
     super();
   }
 
   async process(job: Job<BulkSendJobData>): Promise<void> {
-    const { tenantSlug, phone, type, text, mediaUrl, caption, fileName } = job.data;
+    const { batchId, tenantSlug, phone, type, text, mediaUrl, caption, fileName } = job.data;
     const base = { phone, tenantSlug } as Record<string, unknown>;
 
     let result: { success: boolean; error?: string };
@@ -60,6 +65,31 @@ export class BulkSendProcessor extends WorkerHost {
 
     if (!result.success) {
       this.logger.warn(`Bulk send to ${phone} failed: ${result.error}`);
+    }
+
+    // Update batch counters
+    if (batchId) {
+      await this.updateBatch(batchId, result.success);
+    }
+  }
+
+  private async updateBatch(batchId: string, success: boolean): Promise<void> {
+    try {
+      const field = success ? 'sent' : 'failed';
+      const batch = await this.prisma.bulkSendBatch.update({
+        where: { id: batchId },
+        data: { [field]: { increment: 1 } },
+      });
+
+      // Mark complete when all processed
+      if (batch.sent + batch.failed >= batch.total) {
+        await this.prisma.bulkSendBatch.update({
+          where: { id: batchId },
+          data: { status: batch.failed === batch.total ? 'FAILED' : 'COMPLETED' },
+        });
+      }
+    } catch (err) {
+      this.logger.warn(`Failed to update batch ${batchId}: ${String(err)}`);
     }
   }
 }

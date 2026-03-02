@@ -48,6 +48,7 @@ model Tenant {
   subscription      Subscription?
   usageRecords      UsageRecord[]
   scheduledMessages ScheduledMessage[]
+  bulkSendBatches   BulkSendBatch[]
 
   @@map("tenants")
 }
@@ -109,7 +110,8 @@ model WhatsAppInstance {
   id            String                 @id @default(uuid())
   tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tenantId      String
-  tenantSlug    String                 @unique // mantido para compatibilidade com Evolution API
+  tenantSlug    String                 // slug do tenant (pode ter múltiplas instâncias)
+  displayName   String?                // nome amigável dado pelo usuário
   instanceName  String                 @unique
   instanceToken String?
   status        WhatsAppInstanceStatus @default(DISCONNECTED)
@@ -290,4 +292,28 @@ model WebhookDeliveryLog {
   @@index([webhookId])
   @@index([webhookId, createdAt(sort: Desc)])
   @@map("webhook_delivery_logs")
+}
+
+// ─── Bulk Send Batches ──────────────────────────────────────────────────────
+
+model BulkSendBatch {
+  id        String          @id @default(uuid())
+  tenant    Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantId  String
+  total     Int
+  sent      Int             @default(0)
+  failed    Int             @default(0)
+  status    BulkSendStatus  @default(PROCESSING)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("bulk_send_batches")
+}
+
+enum BulkSendStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
 }

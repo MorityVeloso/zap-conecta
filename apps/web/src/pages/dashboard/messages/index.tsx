@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText } from 'lucide-react'
+import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -272,8 +272,74 @@ function InitialsAvatar({ name }: { name: string }) {
   )
 }
 
+// ── Bulk send tracking ──────────────────────────────────────────────────────
+
+interface BulkBatchStatus {
+  id: string
+  total: number
+  sent: number
+  failed: number
+  status: 'PROCESSING' | 'COMPLETED' | 'FAILED'
+  progress: number
+  createdAt: string
+}
+
+function BulkSendTracker({ batchId, onDone }: { batchId: string; onDone: () => void }) {
+  const { data: batch } = useQuery({
+    queryKey: ['bulk-batch', batchId],
+    queryFn: () => api.get<BulkBatchStatus>(`/whatsapp/send/bulk/${batchId}`),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status
+      return status === 'PROCESSING' ? 2000 : false
+    },
+  })
+
+  useEffect(() => {
+    if (batch?.status === 'COMPLETED' || batch?.status === 'FAILED') {
+      const timer = setTimeout(onDone, 5000) // auto-dismiss after 5s
+      return () => clearTimeout(timer)
+    }
+  }, [batch?.status, onDone])
+
+  if (!batch) return null
+
+  const isDone = batch.status !== 'PROCESSING'
+
+  return (
+    <div className="px-4 py-2.5 border-b border-border bg-muted/30">
+      <div className="flex items-center gap-2 mb-1.5">
+        <Users className="w-3.5 h-3.5 text-primary" />
+        <span className="text-xs font-medium text-foreground">
+          Envio em massa
+        </span>
+        <Badge
+          variant={batch.status === 'COMPLETED' ? 'success' : batch.status === 'FAILED' ? 'destructive' : 'default'}
+          className="text-[9px] ml-auto"
+        >
+          {batch.status === 'PROCESSING' ? `${batch.progress}%` : batch.status === 'COMPLETED' ? 'Concluído' : 'Falhou'}
+        </Badge>
+      </div>
+      <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+        <div
+          className={cn(
+            'h-full rounded-full transition-all duration-500',
+            isDone && batch.failed === batch.total ? 'bg-destructive' : 'bg-primary',
+          )}
+          style={{ width: `${batch.progress}%` }}
+        />
+      </div>
+      <p className="text-[10px] text-muted-foreground mt-1">
+        {batch.sent} enviados · {batch.failed} falharam · {batch.total} total
+      </p>
+    </div>
+  )
+}
+
 export function MessagesPage() {
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null)
+  const [activeBatchIds, setActiveBatchIds] = useState<string[]>([])
+
+  const removeBatch = (id: string) => setActiveBatchIds((prev) => prev.filter((b) => b !== id))
 
   const { data: conversations = [], isLoading } = useQuery({
     queryKey: ['messages', 'conversations'],
@@ -298,6 +364,11 @@ export function MessagesPage() {
             CSV
           </button>
         </div>
+
+        {/* Active bulk sends */}
+        {activeBatchIds.map((id) => (
+          <BulkSendTracker key={id} batchId={id} onDone={() => removeBatch(id)} />
+        ))}
 
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
