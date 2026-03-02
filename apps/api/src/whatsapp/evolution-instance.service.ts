@@ -373,6 +373,42 @@ export class EvolutionInstanceService {
     };
   }
 
+  /** Returns QR code + pairing code (8-digit code for phone linking) */
+  async getConnectDataForInstance(
+    instanceName: string,
+  ): Promise<{ qrcode: string; imageBase64?: string; pairingCode?: string }> {
+    const response = await this.makeRequest<{
+      pairingCode?: string;
+      code?: string;
+      base64?: string;
+    }>(`/instance/connect/${instanceName}`, 'GET');
+
+    return {
+      qrcode: response.code ?? '',
+      imageBase64: response.base64,
+      pairingCode: response.pairingCode,
+    };
+  }
+
+  /** List all instances from Evolution API with their connection state */
+  async listAllInstanceStates(): Promise<
+    { name: string; state: string }[]
+  > {
+    try {
+      const instances = await this.makeRequest<
+        { instance: { instanceName: string; state: string; status: string } }[]
+      >('/instance/fetchInstances', 'GET');
+
+      return instances.map((i) => ({
+        name: i.instance?.instanceName ?? '',
+        state: i.instance?.state ?? i.instance?.status ?? 'unknown',
+      }));
+    } catch (error) {
+      this.logger.error(`Failed to list instance states: ${String(error)}`);
+      return [];
+    }
+  }
+
   async disconnectInstance(instanceName: string): Promise<void> {
     await this.makeRequest(`/instance/logout/${instanceName}`, 'DELETE');
     this.logger.log(`Instance disconnected: ${instanceName}`);

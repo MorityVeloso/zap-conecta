@@ -8,6 +8,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { ScheduleModule } from '@nestjs/schedule';
 
 import { PrismaModule } from '../prisma/prisma.module';
 import { BillingModule } from '../billing/billing.module';
@@ -18,6 +19,7 @@ import { EvolutionInstanceService } from './evolution-instance.service';
 import { BulkSendProcessor } from './bulk-send.processor';
 import { WebhookDeliveryProcessor } from './webhook-delivery.processor';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
+import { WhatsAppOrphanCleanupService } from './whatsapp-orphan-cleanup.service';
 import { WHATSAPP_CLIENT } from './whatsapp-client.interface';
 import { WhatsAppConnectionController } from './whatsapp-connection.controller';
 import { WhatsAppInstanceController } from './whatsapp-instance.controller';
@@ -33,6 +35,7 @@ import { ZApiClientService } from './zapi-client.service';
     ConfigModule,
     PrismaModule,
     BillingModule,
+    ScheduleModule.forRoot(),
     BullModule.registerQueue({ name: QUEUE_WEBHOOK_DELIVERY }),
     BullModule.registerQueue({ name: QUEUE_BULK_SEND }),
   ],
@@ -52,6 +55,7 @@ import { ZApiClientService } from './zapi-client.service';
     BulkSendProcessor,
     WebhookDeliveryProcessor,
     WebhookDispatcherService,
+    WhatsAppOrphanCleanupService,
     // Feature-flag provider: WHATSAPP_PROVIDER=zapi|evolution (default: evolution)
     {
       provide: WHATSAPP_CLIENT,
