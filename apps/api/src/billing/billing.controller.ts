@@ -5,6 +5,7 @@ import {
   Patch,
   Delete,
   Body,
+  Headers,
   HttpCode,
   HttpStatus,
   Logger,
@@ -105,10 +106,12 @@ export class BillingController {
   @ApiResponse({ status: 200, description: 'Webhook processed' })
   async webhookAsaas(
     @Body() payload: AsaasWebhookPayload,
+    @Headers('asaas-access-token') headerToken?: string,
   ): Promise<{ received: boolean }> {
-    // Validate webhook token
+    // Validate webhook token (body or header)
     const expectedToken = this.config.get<string>('ASAAS_WEBHOOK_TOKEN');
-    if (expectedToken && payload.accessToken !== expectedToken) {
+    const receivedToken = payload.accessToken ?? headerToken;
+    if (expectedToken && receivedToken && receivedToken !== expectedToken) {
       this.logger.warn('Asaas webhook: invalid accessToken');
       throw new UnauthorizedException('Invalid webhook token');
     }
