@@ -17,6 +17,7 @@ import {
 import { CurrentTenant } from '../common/decorators/current-tenant.decorator';
 import type { TenantContext } from '../auth/supabase-jwt.guard';
 import { EvolutionInstanceService } from './evolution-instance.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('WhatsApp')
 @ApiSecurity('x-api-key')
@@ -36,6 +37,7 @@ export class WhatsAppConnectionController {
 
   constructor(
     private readonly evolutionInstanceService: EvolutionInstanceService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Get('status')
@@ -57,6 +59,13 @@ export class WhatsAppConnectionController {
 
     if (connectionStatus.connected) {
       this.clearQrTimeout(instance.instanceName);
+      // Sync DB status if stale
+      if (instance.status !== 'CONNECTED') {
+        await this.prisma.whatsAppInstance.update({
+          where: { id: instance.id },
+          data: { status: 'CONNECTED', phone: connectionStatus.phone ?? instance.phone },
+        });
+      }
       return { status: 'CONNECTED' as const, phone: connectionStatus.phone, instanceConfigured: true, instanceId: instance.id };
     }
 

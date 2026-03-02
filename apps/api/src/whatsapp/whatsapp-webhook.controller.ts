@@ -33,6 +33,7 @@ import {
 } from './evolution-webhook.transformer';
 import { WhatsAppService } from './whatsapp.service';
 import { EvolutionInstanceService } from './evolution-instance.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('WhatsApp Webhooks')
 @Controller('whatsapp')
@@ -44,6 +45,7 @@ export class WhatsAppWebhookController {
     private readonly configService: ConfigService,
     private readonly evolutionInstanceService: EvolutionInstanceService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Post('webhook/receive/:tenantSlug')
@@ -153,6 +155,18 @@ export class WhatsAppWebhookController {
         this.logger.log(`Connection update: state=${parsed.data.state}`);
         const inst = await this.evolutionInstanceService.findByTenant(tenantSlug);
         if (inst) {
+          const newStatus = parsed.data.state === 'open' ? 'CONNECTED' : 'DISCONNECTED';
+          await this.prisma.whatsAppInstance.update({
+            where: { id: inst.id },
+            data: {
+              status: newStatus,
+              ...(parsed.data.state === 'open' && parsed.data.number
+                ? { phone: parsed.data.number }
+                : {}),
+            },
+          });
+          this.logger.log(`Instance ${inst.instanceName} status updated to ${newStatus}`);
+
           if (parsed.data.state === 'open') {
             this.eventEmitter.emit('whatsapp.instance.connected', {
               tenantId: inst.tenantId,
