@@ -328,7 +328,7 @@ export function BillingPage() {
 
   const STATUS_BADGE = {
     ACTIVE: { label: 'Ativo', variant: 'success' as const },
-    TRIALING: { label: 'Aguardando pagamento', variant: 'warning' as const },
+    TRIALING: { label: 'Período de teste', variant: 'warning' as const },
     PAST_DUE: { label: 'Pagamento atrasado', variant: 'destructive' as const },
     CANCELLED: { label: 'Cancelado', variant: 'secondary' as const },
     PAUSED: { label: 'Pausado', variant: 'secondary' as const },

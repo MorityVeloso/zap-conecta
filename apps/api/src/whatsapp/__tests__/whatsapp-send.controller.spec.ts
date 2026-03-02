@@ -54,6 +54,9 @@ function makePrismaMock() {
       create: vi.fn().mockResolvedValue({ id: 'batch-1', total: 3, sent: 0, failed: 0, status: 'PROCESSING' }),
       findFirst: vi.fn(),
     },
+    whatsAppInstance: {
+      findFirst: vi.fn().mockResolvedValue({ id: 'inst-1' }),
+    },
   } as unknown as PrismaService;
 }
 
@@ -211,6 +214,22 @@ describe('WhatsAppSendController', () => {
 
     expect(usage.assertBelowQuota).not.toHaveBeenCalled();
     expect(result).toEqual({ success: true });
+  });
+
+  // ── Connection check ─────────────────────────────────
+
+  it('blocks send when no WhatsApp instance is connected', async () => {
+    // Re-create controller with prisma that returns null for connected instance
+    const prismaNoInstance = makePrismaMock();
+    vi.mocked(prismaNoInstance.whatsAppInstance.findFirst).mockResolvedValue(null);
+    const ctrl = new WhatsAppSendController(whatsApp, usage, evolutionInstance, bulkQueue, prismaNoInstance);
+    vi.mocked(usage.assertBelowQuota).mockResolvedValue(undefined);
+
+    await expect(
+      ctrl.sendText(TENANT, { phone: '5511999998888', message: 'Hi' } as never),
+    ).rejects.toThrow('Nenhuma instância WhatsApp conectada');
+
+    expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
   });
 
   // ── Bulk send ─────────────────────────────────────────

@@ -2,7 +2,7 @@
  * WhatsAppSendController — all message send endpoints.
  * Enforces per-tenant monthly quota before each send.
  */
-import { Controller, Post, Get, Param, Body, NotFoundException } from '@nestjs/common';
+import { Controller, Post, Get, Param, Body, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import {
@@ -61,10 +61,24 @@ export class WhatsAppSendController {
     return instance?.id ?? tenantSlug;
   }
 
+  /** Ensure tenant has at least one connected WhatsApp instance before sending */
+  private async assertConnected(tenantId: string): Promise<void> {
+    const connected = await this.prisma.whatsAppInstance.findFirst({
+      where: { tenantId, status: 'CONNECTED' },
+      select: { id: true },
+    });
+    if (!connected) {
+      throw new BadRequestException(
+        'Nenhuma instância WhatsApp conectada. Conecte um número antes de enviar mensagens.',
+      );
+    }
+  }
+
   @Post('send/text')
   @ApiOperation({ summary: 'Send a text message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Text message sent' })
   async sendText(@CurrentTenant() tenant: TenantContext, @Body() dto: SendTextMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendTextMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -78,6 +92,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a button message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Button message sent' })
   async sendButton(@CurrentTenant() tenant: TenantContext, @Body() dto: SendButtonMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendButtonMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -91,6 +106,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a list message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'List message sent' })
   async sendList(@CurrentTenant() tenant: TenantContext, @Body() dto: SendListMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendListMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -104,6 +120,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send an image message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Image message sent' })
   async sendImage(@CurrentTenant() tenant: TenantContext, @Body() dto: SendImageMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendImageMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -117,6 +134,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a document message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Document message sent' })
   async sendDocument(@CurrentTenant() tenant: TenantContext, @Body() dto: SendDocumentMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendDocumentMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -130,6 +148,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a PIX payment message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'PIX message sent' })
   async sendPix(@CurrentTenant() tenant: TenantContext, @Body() dto: SendPixMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendPixMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -143,6 +162,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a template message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Template message sent' })
   async sendTemplate(@CurrentTenant() tenant: TenantContext, @Body() dto: SendTemplateMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendTemplateMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -156,6 +176,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send an audio message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Audio message sent' })
   async sendAudio(@CurrentTenant() tenant: TenantContext, @Body() dto: SendAudioMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendAudioMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -169,6 +190,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a video message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Video message sent' })
   async sendVideo(@CurrentTenant() tenant: TenantContext, @Body() dto: SendVideoMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendVideoMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -182,6 +204,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a sticker message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Sticker message sent' })
   async sendSticker(@CurrentTenant() tenant: TenantContext, @Body() dto: SendStickerMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendStickerMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -195,6 +218,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a location message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Location message sent' })
   async sendLocation(@CurrentTenant() tenant: TenantContext, @Body() dto: SendLocationMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendLocationMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -208,6 +232,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a contact card message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Contact message sent' })
   async sendContact(@CurrentTenant() tenant: TenantContext, @Body() dto: SendContactMessageDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendContactMessage(withTenant(dto, tenant));
     if (result.success) {
@@ -221,6 +246,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send an emoji reaction to a message' })
   @ApiResponse({ status: 201, description: 'Reaction sent' })
   async sendReaction(@CurrentTenant() tenant: TenantContext, @Body() dto: SendReactionDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     return this.whatsAppService.sendReaction(withTenant(dto, tenant));
   }
 
@@ -228,6 +254,7 @@ export class WhatsAppSendController {
   @ApiOperation({ summary: 'Send a poll message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Poll message sent' })
   async sendPoll(@CurrentTenant() tenant: TenantContext, @Body() dto: SendPollDto): Promise<MessageResult> {
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendPoll(withTenant(dto, tenant));
     if (result.success) {
@@ -260,6 +287,7 @@ export class WhatsAppSendController {
     @Body() body: unknown,
   ): Promise<{ batchId: string; total: number }> {
     const dto = BulkSendDtoSchema.parse(body);
+    await this.assertConnected(tenant.tenantId);
     await this.usageService.assertBelowQuota(tenant.tenantId);
 
     const batch = await this.prisma.bulkSendBatch.create({

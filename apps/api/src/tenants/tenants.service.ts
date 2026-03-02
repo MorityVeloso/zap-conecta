@@ -124,16 +124,12 @@ export class TenantsService {
 
     // Profile é criado automaticamente pelo trigger handle_new_user()
 
-    // Criar subscription em trial (14 dias)
-    const trialEndsAt = new Date();
-    trialEndsAt.setDate(trialEndsAt.getDate() + 14);
-
+    // Free plan → ACTIVE immediately (no payment needed)
     await this.prisma.subscription.create({
       data: {
         tenantId: tenant.id,
         planId: freePlan.id,
-        status: 'TRIALING',
-        trialEndsAt,
+        status: 'ACTIVE',
       },
     });
 

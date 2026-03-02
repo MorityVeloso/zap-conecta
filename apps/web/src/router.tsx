@@ -178,7 +178,20 @@ const scheduledRoute = createRoute({
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: () => { throw redirect({ to: '/dashboard' }) },
+  beforeLoad: async () => {
+    // If URL has Supabase auth hash (email confirmation, magic link), wait for
+    // the client to process it before redirecting
+    const hash = window.location.hash
+    if (hash.includes('access_token') || hash.includes('type=signup') || hash.includes('type=email')) {
+      await new Promise((r) => setTimeout(r, 1000))
+      const { data } = await supabase.auth.getSession()
+      if (data.session) {
+        throw redirect({ to: '/dashboard' })
+      }
+      throw redirect({ to: '/auth/login' })
+    }
+    throw redirect({ to: '/dashboard' })
+  },
 })
 
 const loginShortcut = createRoute({
