@@ -21,6 +21,8 @@ import { EvolutionInstanceService } from './evolution-instance.service';
 @Controller('whatsapp')
 export class WhatsAppConnectionController {
   private readonly logger = new Logger(WhatsAppConnectionController.name);
+  private readonly qrTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  private static readonly QR_TIMEOUT_MS = 60_000; // 1 min
 
   constructor(
     private readonly evolutionInstanceService: EvolutionInstanceService,
@@ -39,6 +41,7 @@ export class WhatsAppConnectionController {
     const connectionStatus = await this.evolutionInstanceService.getConnectionStatusForInstance(instance.instanceName);
 
     if (connectionStatus.connected) {
+      this.clearQrTimeout(instance.instanceName);
       return { status: 'CONNECTED' as const, phone: connectionStatus.phone, instanceConfigured: true };
     }
 
@@ -74,6 +77,7 @@ export class WhatsAppConnectionController {
       try {
         const qrData = await this.evolutionInstanceService.getQrCodeForInstance(instance.instanceName);
         if (qrData.imageBase64 ?? qrData.qrcode) {
+          this.scheduleQrTimeout(instance.instanceName);
           return { status: 'QR_CODE' as const, qrCode: qrData.imageBase64 ?? qrData.qrcode };
         }
       } catch (error) {
@@ -91,6 +95,7 @@ export class WhatsAppConnectionController {
   @ApiResponse({ status: 200, description: 'Disconnected successfully' })
   async disconnect(@CurrentTenant() tenant: TenantContext): Promise<{ success: boolean }> {
     const instance = await this.evolutionInstanceService.getInstance(tenant.tenantSlug);
+    this.clearQrTimeout(instance.instanceName);
     await this.evolutionInstanceService.disconnectInstance(instance.instanceName);
     return { success: true };
   }
@@ -103,5 +108,33 @@ export class WhatsAppConnectionController {
     const instance = await this.evolutionInstanceService.getInstance(tenant.tenantSlug);
     await this.evolutionInstanceService.restartInstance(instance.instanceName);
     return { success: true };
+  }
+
+  /** Auto-disconnect after QR_TIMEOUT_MS if not scanned */
+  private scheduleQrTimeout(instanceName: string): void {
+    this.clearQrTimeout(instanceName);
+    const timer = setTimeout(async () => {
+      try {
+        const state = await this.evolutionInstanceService.getConnectionStatusForInstance(instanceName);
+        if (!state.connected) {
+          this.logger.warn(`QR timeout: disconnecting idle instance ${instanceName}`);
+          await this.evolutionInstanceService.disconnectInstance(instanceName);
+        }
+      } catch (err) {
+        this.logger.error(`QR timeout cleanup failed for ${instanceName}: ${String(err)}`);
+      } finally {
+        this.qrTimeouts.delete(instanceName);
+      }
+    }, WhatsAppConnectionController.QR_TIMEOUT_MS);
+    timer.unref(); // don't block Node shutdown
+    this.qrTimeouts.set(instanceName, timer);
+  }
+
+  private clearQrTimeout(instanceName: string): void {
+    const existing = this.qrTimeouts.get(instanceName);
+    if (existing) {
+      clearTimeout(existing);
+      this.qrTimeouts.delete(instanceName);
+    }
   }
 }
