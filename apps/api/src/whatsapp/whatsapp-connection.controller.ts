@@ -30,7 +30,8 @@ export class WhatsAppConnectionController {
 
   private static readonly QR_TIMEOUT_MS = 60_000;       // 1 min
   private static readonly COOLDOWN_MS = 30_000;          // 30s between attempts
-  private static readonly MAX_ATTEMPTS_PER_HOUR = 5;
+  private static readonly MAX_ATTEMPTS_PER_WINDOW = 5;
+  private static readonly WINDOW_MS = 10 * 60_000;      // 10 min
 
   constructor(
     private readonly evolutionInstanceService: EvolutionInstanceService,
@@ -125,7 +126,7 @@ export class WhatsAppConnectionController {
     return { success: true };
   }
 
-  /** Enforce cooldown (30s) and hourly rate limit (5/hour) */
+  /** Enforce cooldown (30s) and window rate limit (5 per 10min) */
   private enforceRateLimit(tenantSlug: string): void {
     const now = Date.now();
 
@@ -139,19 +140,19 @@ export class WhatsAppConnectionController {
       );
     }
 
-    // Hourly limit: max 5 attempts per rolling hour
-    const hourly = this.hourlyAttempts.get(tenantSlug);
-    if (hourly && now < hourly.resetAt) {
-      if (hourly.count >= WhatsAppConnectionController.MAX_ATTEMPTS_PER_HOUR) {
-        const waitMin = Math.ceil((hourly.resetAt - now) / 60_000);
+    // Window limit: max 5 attempts per 10min
+    const window = this.hourlyAttempts.get(tenantSlug);
+    if (window && now < window.resetAt) {
+      if (window.count >= WhatsAppConnectionController.MAX_ATTEMPTS_PER_WINDOW) {
+        const waitMin = Math.ceil((window.resetAt - now) / 60_000);
         throw new HttpException(
-          `Limite de ${WhatsAppConnectionController.MAX_ATTEMPTS_PER_HOUR} tentativas por hora atingido. Tente em ${waitMin} min.`,
+          `Limite de ${WhatsAppConnectionController.MAX_ATTEMPTS_PER_WINDOW} tentativas atingido. Tente em ${waitMin} min.`,
           HttpStatus.TOO_MANY_REQUESTS,
         );
       }
-      hourly.count++;
+      window.count++;
     } else {
-      this.hourlyAttempts.set(tenantSlug, { count: 1, resetAt: now + 3_600_000 });
+      this.hourlyAttempts.set(tenantSlug, { count: 1, resetAt: now + WhatsAppConnectionController.WINDOW_MS });
     }
 
     this.lastConnectAttempt.set(tenantSlug, now);
