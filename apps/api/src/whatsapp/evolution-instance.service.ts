@@ -308,6 +308,20 @@ export class EvolutionInstanceService {
     this.logger.log(`Instance re-created on Evolution API: ${instanceName}`);
   }
 
+  /** Public: verify instance exists on Evolution API; recreate if not */
+  async ensureEvolutionInstance(
+    instanceName: string,
+    tenantSlug: string,
+  ): Promise<void> {
+    const exists = await this.instanceExistsOnEvolutionApi(instanceName);
+    if (!exists) {
+      this.logger.warn(
+        `Instance ${instanceName} missing on Evolution API — re-creating`,
+      );
+      await this.recreateOnEvolutionApi(instanceName, tenantSlug);
+    }
+  }
+
   async getInstance(tenantSlug: string): Promise<WhatsAppInstance> {
     const instance = await this.prisma.whatsAppInstance.findFirst({
       where: { tenantSlug },

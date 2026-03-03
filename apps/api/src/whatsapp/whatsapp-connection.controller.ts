@@ -108,6 +108,9 @@ export class WhatsAppConnectionController {
       instance = await this.evolutionInstanceService.getOrCreateInstance(tenant.tenantSlug, tenant.tenantId);
     }
 
+    // Ensure the instance exists on Evolution API (may have been lost on redeploy/delete)
+    await this.evolutionInstanceService.ensureEvolutionInstance(instance.instanceName, tenant.tenantSlug);
+
     // Evolution API needs a moment to configure a newly created instance
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
