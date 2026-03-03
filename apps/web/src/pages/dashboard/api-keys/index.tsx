@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Copy, Trash2, Key, CheckCircle, Loader2, Eye, EyeOff } from 'lucide-react'
+import { Plus, Copy, Trash2, Key, CheckCircle, Loader2, Eye, EyeOff, ExternalLink, Terminal } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Alert } from '@/components/ui/alert'
 import { Pagination } from '@/components/ui/pagination'
 import { formatRelativeTime } from '@/lib/utils'
+
+const PUBLIC_API_URL = import.meta.env.VITE_PUBLIC_API_URL ?? import.meta.env.VITE_API_URL ?? 'https://api.zapconectapi.com.br'
 
 interface ApiKey {
   id: string
@@ -88,39 +90,93 @@ export function ApiKeysPage() {
         </Button>
       </div>
 
-      {/* Reveal newly created key */}
+      {/* Reveal newly created key + integration instructions */}
       {createdKey && (
-        <Alert variant="success" className="mb-6">
-          <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium">Chave criada com sucesso!</p>
-            <p className="text-sm opacity-80 mt-0.5">
-              Copie agora — este valor não será exibido novamente.
-            </p>
-            <div className="flex items-center gap-2 mt-3">
-              <div className="relative flex-1">
-                <Input
-                  readOnly
-                  value={showKey ? createdKey.plainKey : createdKey.plainKey.replace(/./g, '•')}
-                  className="font-mono text-xs pr-10 bg-background/50"
-                />
-                <button
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  onClick={() => setShowKey(!showKey)}
-                >
-                  {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+        <div className="mb-6 space-y-4">
+          <Alert variant="success">
+            <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="font-medium">Chave criada com sucesso!</p>
+              <p className="text-sm opacity-80 mt-0.5">
+                Copie agora — este valor não será exibido novamente.
+              </p>
+              <div className="flex items-center gap-2 mt-3">
+                <div className="relative flex-1">
+                  <Input
+                    readOnly
+                    value={showKey ? createdKey.plainKey : createdKey.plainKey.replace(/./g, '•')}
+                    className="font-mono text-xs pr-10 bg-background/50"
+                  />
+                  <button
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    onClick={() => setShowKey(!showKey)}
+                    type="button"
+                  >
+                    {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => copyToClipboard(createdKey.plainKey)}>
+                  <Copy className="w-4 h-4 mr-1.5" />
+                  Copiar
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setCreatedKey(null)}>
+                  ✕
+                </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={() => copyToClipboard(createdKey.plainKey)}>
-                <Copy className="w-4 h-4 mr-1.5" />
-                Copiar
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setCreatedKey(null)}>
-                ✕
-              </Button>
             </div>
-          </div>
-        </Alert>
+          </Alert>
+
+          <Card className="p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Terminal className="w-4 h-4 text-primary" />
+              <h3 className="text-sm font-semibold text-foreground">Como integrar</h3>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs text-muted-foreground">URL da API</Label>
+                <div className="flex items-center gap-2 mt-1">
+                  <Input
+                    readOnly
+                    value={PUBLIC_API_URL}
+                    className="font-mono text-xs bg-muted/50"
+                  />
+                  <Button variant="outline" size="sm" onClick={() => copyToClipboard(PUBLIC_API_URL)}>
+                    <Copy className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs text-muted-foreground">Exemplo de uso (cURL)</Label>
+                <div className="relative mt-1">
+                  <pre className="bg-muted/50 border border-border rounded-lg px-4 py-3 text-xs font-mono text-foreground overflow-x-auto whitespace-pre">{`curl ${PUBLIC_API_URL}/whatsapp/send/text \\
+  -H "x-api-key: ${showKey ? createdKey.plainKey : createdKey.keyPrefix + '...'}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"phone":"5511999998888","message":"Olá!"}'`}</pre>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="absolute top-1.5 right-1.5 h-7 w-7 p-0"
+                    onClick={() => copyToClipboard(`curl ${PUBLIC_API_URL}/whatsapp/send/text \\\n  -H "x-api-key: ${createdKey.plainKey}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"phone":"5511999998888","message":"Olá!"}'`)}
+                  >
+                    <Copy className="w-3 h-3" />
+                  </Button>
+                </div>
+              </div>
+
+              <a
+                href={`${PUBLIC_API_URL}/docs`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline mt-1"
+              >
+                <ExternalLink className="w-3 h-3" />
+                Ver documentação completa (Swagger)
+              </a>
+            </div>
+          </Card>
+        </div>
       )}
 
       {isLoading ? (
