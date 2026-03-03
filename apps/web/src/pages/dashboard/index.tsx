@@ -54,6 +54,7 @@ export function DashboardPage() {
           value={stats?.messagesSentThisMonth ?? 0}
           description="Este mês"
           icon={<TrendingUp className="size-4" aria-hidden="true" />}
+          trend={stats?.sentTrend ?? undefined}
           loading={isLoading}
         />
         <StatCard
@@ -61,6 +62,7 @@ export function DashboardPage() {
           value={stats?.messagesReceivedThisMonth ?? 0}
           description="Este mês"
           icon={<MessageSquare className="size-4" aria-hidden="true" />}
+          trend={stats?.receivedTrend ?? undefined}
           loading={isLoading}
         />
         <StatCard

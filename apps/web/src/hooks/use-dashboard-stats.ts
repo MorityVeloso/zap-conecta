@@ -4,6 +4,8 @@ import { api } from '@/lib/api'
 export interface DashboardStats {
   messagesSentThisMonth: number
   messagesReceivedThisMonth: number
+  sentTrend: number | null
+  receivedTrend: number | null
   activeInstances: number
   totalInstances: number
   messagesLimit: number

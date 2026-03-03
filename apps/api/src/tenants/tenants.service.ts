@@ -224,11 +224,19 @@ export class TenantsService {
   }
 
   async getDashboardStats(ctx: TenantContext) {
-    const period = new Date().toISOString().slice(0, 7);
+    const now = new Date();
+    const period = now.toISOString().slice(0, 7);
 
-    const [usage, instances, recentMessages] = await Promise.all([
+    // Previous month for trend calculation
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevPeriod = prev.toISOString().slice(0, 7);
+
+    const [usage, prevUsage, instances, recentMessages] = await Promise.all([
       this.prisma.usageRecord.findFirst({
         where: { tenantId: ctx.tenantId, period },
+      }),
+      this.prisma.usageRecord.findFirst({
+        where: { tenantId: ctx.tenantId, period: prevPeriod },
       }),
       this.prisma.whatsAppInstance.findMany({
         where: { tenantId: ctx.tenantId },
@@ -254,12 +262,21 @@ export class TenantsService {
       .then((t) => t?.plan);
 
     const messagesSent = usage?.messagesSent ?? 0;
+    const messagesReceived = usage?.messagesReceived ?? 0;
     const messagesLimit = plan?.messagesPerMonth ?? 300;
     const activeInstances = instances.filter((i) => i.status === 'CONNECTED').length;
 
+    // Trend: percentage change vs previous month (null if no previous data)
+    const calcTrend = (current: number, previous: number | undefined): number | null => {
+      if (previous === undefined || previous === 0) return current > 0 ? 100 : null;
+      return Math.round(((current - previous) / previous) * 100);
+    };
+
     return {
       messagesSentThisMonth: messagesSent,
-      messagesReceivedThisMonth: usage?.messagesReceived ?? 0,
+      messagesReceivedThisMonth: messagesReceived,
+      sentTrend: calcTrend(messagesSent, prevUsage?.messagesSent),
+      receivedTrend: calcTrend(messagesReceived, prevUsage?.messagesReceived),
       activeInstances,
       totalInstances: instances.length,
       messagesLimit,
