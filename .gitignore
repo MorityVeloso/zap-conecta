@@ -47,3 +47,4 @@ e2e/.auth/
 
 # Tool caches
 .serena/
+.vercel
