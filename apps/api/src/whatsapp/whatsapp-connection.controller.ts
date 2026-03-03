@@ -2,11 +2,13 @@ import {
   Controller,
   Get,
   Post,
+  Sse,
   Query,
   HttpCode,
   HttpStatus,
   HttpException,
   Logger,
+  MessageEvent,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -14,6 +16,8 @@ import {
   ApiOperation,
   ApiResponse,
 } from '@nestjs/swagger';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { Observable } from 'rxjs';
 import { CurrentTenant } from '../common/decorators/current-tenant.decorator';
 import type { TenantContext } from '../auth/supabase-jwt.guard';
 import { EvolutionInstanceService } from './evolution-instance.service';
@@ -38,6 +42,7 @@ export class WhatsAppConnectionController {
   constructor(
     private readonly evolutionInstanceService: EvolutionInstanceService,
     private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   @Get('status')
@@ -47,35 +52,28 @@ export class WhatsAppConnectionController {
     @CurrentTenant() tenant: TenantContext,
     @Query('instanceId') instanceId?: string,
   ) {
+    // Fast path: read from DB (kept in sync by webhooks) — no Evolution API calls
     const instance = instanceId
-      ? await this.evolutionInstanceService.findById(instanceId)
-      : await this.evolutionInstanceService.findByTenant(tenant.tenantSlug);
+      ? await this.prisma.whatsAppInstance.findUnique({ where: { id: instanceId } })
+      : await this.prisma.whatsAppInstance.findFirst({ where: { tenantSlug: tenant.tenantSlug } });
 
     if (!instance) {
       return { status: 'DISCONNECTED' as const, instanceConfigured: false };
     }
 
-    const connectionStatus = await this.evolutionInstanceService.getConnectionStatusForInstance(instance.instanceName);
-
-    if (connectionStatus.connected) {
+    if (instance.status === 'CONNECTED') {
       this.clearQrTimeout(instance.instanceName);
-      // Sync DB status if stale
-      if (instance.status !== 'CONNECTED') {
-        await this.prisma.whatsAppInstance.update({
-          where: { id: instance.id },
-          data: { status: 'CONNECTED', phone: connectionStatus.phone ?? instance.phone },
-        });
-      }
-      return { status: 'CONNECTED' as const, phone: connectionStatus.phone, instanceConfigured: true, instanceId: instance.id };
+      return { status: 'CONNECTED' as const, phone: instance.phone, instanceConfigured: true, instanceId: instance.id };
     }
 
+    // Not connected — check if there's a pending QR code (only call Evolution if needed)
     try {
       const qrData = await this.evolutionInstanceService.getQrCodeForInstance(instance.instanceName);
       if (qrData.imageBase64 ?? qrData.qrcode) {
         return { status: 'QR_CODE' as const, qrCode: qrData.imageBase64 ?? qrData.qrcode, instanceConfigured: true, instanceId: instance.id };
       }
     } catch {
-      // QR not available yet
+      // QR not available
     }
 
     return { status: 'DISCONNECTED' as const, instanceConfigured: true, instanceId: instance.id };
@@ -109,10 +107,20 @@ export class WhatsAppConnectionController {
     }
 
     // Ensure the instance exists on Evolution API (may have been lost on redeploy/delete)
-    await this.evolutionInstanceService.ensureEvolutionInstance(instance.instanceName, tenant.tenantSlug);
+    // Returns QR data if instance was just recreated (avoids extra round-trip)
+    const recreatedQr = await this.evolutionInstanceService.ensureEvolutionInstance(instance.instanceName, tenant.tenantSlug);
 
-    // Evolution API needs a moment to configure a newly created instance
-    for (let attempt = 0; attempt < 3; attempt++) {
+    if (recreatedQr && (recreatedQr.imageBase64 ?? recreatedQr.qrcode)) {
+      this.scheduleQrTimeout(instance.instanceName);
+      return {
+        status: 'QR_CODE' as const,
+        qrCode: recreatedQr.imageBase64 ?? recreatedQr.qrcode,
+        pairingCode: recreatedQr.pairingCode ?? null,
+      };
+    }
+
+    // Instance already existed — get fresh QR code (1 attempt + 1 retry)
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const qrData = await this.evolutionInstanceService.getConnectDataForInstance(instance.instanceName);
         if (qrData.imageBase64 ?? qrData.qrcode) {
@@ -124,9 +132,9 @@ export class WhatsAppConnectionController {
           };
         }
       } catch (error) {
-        this.logger.warn(`QR code attempt ${attempt + 1}/3 failed: ${String(error)}`);
+        this.logger.warn(`QR code attempt ${attempt + 1}/2 failed: ${String(error)}`);
       }
-      await new Promise((r) => setTimeout(r, 2000));
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 1500));
     }
 
     return { status: 'DISCONNECTED' as const, error: 'Não foi possível gerar o QR code. Tente novamente.' };
@@ -157,6 +165,40 @@ export class WhatsAppConnectionController {
     const instance = await this.evolutionInstanceService.getInstance(tenant.tenantSlug);
     await this.evolutionInstanceService.restartInstance(instance.instanceName);
     return { success: true };
+  }
+
+  @Sse('status/stream')
+  @ApiOperation({ summary: 'SSE stream for real-time connection status updates' })
+  statusStream(@CurrentTenant() tenant: TenantContext): Observable<MessageEvent> {
+    return new Observable((subscriber) => {
+      const onConnected = (data: { tenantId: string; instanceId: string; phone?: string }) => {
+        if (data.tenantId !== tenant.tenantId) return;
+        subscriber.next({
+          data: JSON.stringify({ status: 'CONNECTED', instanceId: data.instanceId, phone: data.phone }),
+        } as MessageEvent);
+      };
+
+      const onDisconnected = (data: { tenantId: string; instanceId: string }) => {
+        if (data.tenantId !== tenant.tenantId) return;
+        subscriber.next({
+          data: JSON.stringify({ status: 'DISCONNECTED', instanceId: data.instanceId }),
+        } as MessageEvent);
+      };
+
+      this.eventEmitter.on('whatsapp.instance.connected', onConnected);
+      this.eventEmitter.on('whatsapp.instance.disconnected', onDisconnected);
+
+      // Keep-alive every 30s to prevent proxy/LB timeouts
+      const keepAlive = setInterval(() => {
+        subscriber.next({ data: JSON.stringify({ type: 'ping' }) } as MessageEvent);
+      }, 30_000);
+
+      return () => {
+        this.eventEmitter.off('whatsapp.instance.connected', onConnected);
+        this.eventEmitter.off('whatsapp.instance.disconnected', onDisconnected);
+        clearInterval(keepAlive);
+      };
+    });
   }
 
   /** Enforce cooldown (30s) and window rate limit (5 per 10min) */

@@ -158,40 +158,48 @@ export class WhatsAppWebhookController {
         // Only persist terminal states (open / close) — ignore transient "connecting"
         if (state !== 'open' && state !== 'close') break;
 
-        const inst = await this.evolutionInstanceService.findByTenant(tenantSlug);
-        if (inst) {
-          const newStatus = state === 'open' ? 'CONNECTED' : 'DISCONNECTED';
-          await this.prisma.whatsAppInstance.update({
-            where: { id: inst.id },
-            data: {
-              status: newStatus,
-              ...(state === 'open' && parsed.data.number
-                ? { phone: parsed.data.number }
-                : {}),
-            },
-          });
-          this.logger.log(`Instance ${inst.instanceName} status updated to ${newStatus}`);
+        const newStatus = state === 'open' ? 'CONNECTED' : 'DISCONNECTED';
 
-          if (state === 'open') {
-            this.eventEmitter.emit('whatsapp.instance.connected', {
-              tenantId: inst.tenantId,
-              tenantSlug,
-              instanceId: inst.id,
-              phone: parsed.data.number ?? undefined,
-            });
-          } else {
-            this.eventEmitter.emit('whatsapp.instance.disconnected', {
-              tenantId: inst.tenantId,
-              tenantSlug,
-              instanceId: inst.id,
-            });
-          }
-        }
+        // Fast path: single updateMany by tenantSlug (no findByTenant round-trip)
+        await this.prisma.whatsAppInstance.updateMany({
+          where: { tenantSlug },
+          data: {
+            status: newStatus,
+            ...(state === 'open' && parsed.data.number
+              ? { phone: parsed.data.number }
+              : {}),
+          },
+        });
+        this.logger.log(`Instance(s) for ${tenantSlug} updated to ${newStatus}`);
+
+        // Emit events async (don't block webhook response)
+        this.emitConnectionEvent(tenantSlug, state, parsed.data.number);
         break;
       }
 
       default:
         this.logger.log(`Unhandled Evolution event: ${event}`);
     }
+  }
+
+  /** Fire-and-forget: resolve instance data and emit connection event */
+  private emitConnectionEvent(tenantSlug: string, state: string, phone?: string): void {
+    this.prisma.whatsAppInstance.findFirst({
+      where: { tenantSlug },
+      select: { id: true, tenantId: true, instanceName: true },
+    }).then((inst) => {
+      if (!inst) return;
+      const event = state === 'open'
+        ? 'whatsapp.instance.connected'
+        : 'whatsapp.instance.disconnected';
+      this.eventEmitter.emit(event, {
+        tenantId: inst.tenantId,
+        tenantSlug,
+        instanceId: inst.id,
+        ...(phone ? { phone } : {}),
+      });
+    }).catch((err) => {
+      this.logger.warn(`Failed to emit connection event: ${String(err)}`);
+    });
   }
 }

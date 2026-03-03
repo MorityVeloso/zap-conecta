@@ -271,16 +271,18 @@ export class EvolutionInstanceService {
     }
   }
 
-  /** Re-create an instance on Evolution API (DB record already exists) */
+  /** Re-create an instance on Evolution API (DB record already exists).
+   *  Returns QR data from the create response to avoid a second round-trip. */
   private async recreateOnEvolutionApi(
     instanceName: string,
     tenantSlug: string,
-  ): Promise<void> {
+  ): Promise<{ qrcode?: string; imageBase64?: string; pairingCode?: string }> {
     const webhookUrl = this.buildWebhookUrl(tenantSlug);
 
     const createResponse = await this.makeRequest<{
       instance?: { instanceName?: string };
       hash?: Record<string, string>;
+      qrcode?: { code?: string; base64?: string; pairingCode?: string };
     }>('/instance/create', 'POST', {
       instanceName,
       integration: 'WHATSAPP-BAILEYS',
@@ -306,20 +308,28 @@ export class EvolutionInstanceService {
     });
 
     this.logger.log(`Instance re-created on Evolution API: ${instanceName}`);
+
+    return {
+      qrcode: createResponse.qrcode?.code,
+      imageBase64: createResponse.qrcode?.base64,
+      pairingCode: createResponse.qrcode?.pairingCode,
+    };
   }
 
-  /** Public: verify instance exists on Evolution API; recreate if not */
+  /** Public: verify instance exists on Evolution API; recreate if not.
+   *  Returns QR data when recreation happened (avoids extra round-trip). */
   async ensureEvolutionInstance(
     instanceName: string,
     tenantSlug: string,
-  ): Promise<void> {
+  ): Promise<{ qrcode?: string; imageBase64?: string; pairingCode?: string } | null> {
     const exists = await this.instanceExistsOnEvolutionApi(instanceName);
     if (!exists) {
       this.logger.warn(
         `Instance ${instanceName} missing on Evolution API — re-creating`,
       );
-      await this.recreateOnEvolutionApi(instanceName, tenantSlug);
+      return this.recreateOnEvolutionApi(instanceName, tenantSlug);
     }
+    return null;
   }
 
   async getInstance(tenantSlug: string): Promise<WhatsAppInstance> {

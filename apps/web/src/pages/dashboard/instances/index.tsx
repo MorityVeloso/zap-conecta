@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Smartphone, Plus, RefreshCw, Wifi, WifiOff, Loader2, Trash2, QrCode } from 'lucide-react'
+import { Smartphone, Plus, RefreshCw, Wifi, WifiOff, Loader2, Trash2, QrCode, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -27,8 +28,13 @@ interface InstanceStatusResponse {
   status: ConnectionStatus
   phone?: string
   qrCode?: string
+  pairingCode?: string | null
   instanceConfigured: boolean
   instanceId?: string
+}
+
+interface ConnectResponse extends InstanceStatusResponse {
+  error?: string
 }
 
 function QrCodeDisplay({ data }: { data: string }) {
@@ -51,6 +57,94 @@ function QrCodeDisplay({ data }: { data: string }) {
       {data}
     </div>
   )
+}
+
+function PairingCodeDisplay({ code }: { code: string }) {
+  const [copied, setCopied] = useState(false)
+  const formatted = code.replace(/(.{4})(.{4})/, '$1-$2')
+
+  const copy = useCallback(() => {
+    void navigator.clipboard.writeText(code)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }, [code])
+
+  return (
+    <div className="flex items-center gap-2 bg-muted rounded-lg px-4 py-2.5 mt-3">
+      <span className="text-xs text-muted-foreground">Código:</span>
+      <span className="font-mono font-bold text-lg tracking-widest text-foreground">{formatted}</span>
+      <button
+        onClick={copy}
+        className="ml-1 p-1 rounded hover:bg-background transition-colors"
+        aria-label="Copiar código"
+      >
+        {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5 text-muted-foreground" />}
+      </button>
+    </div>
+  )
+}
+
+// ── SSE hook for real-time status ───────────────────────────────────────────
+
+function useStatusSSE(onStatusChange: (data: { status: string; instanceId: string; phone?: string }) => void) {
+  const eventSourceRef = useRef<EventSource | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    const connect = async () => {
+      const { data } = await supabase.auth.getSession()
+      const token = data.session?.access_token
+      if (!token || cancelled) return
+
+      const apiUrl = import.meta.env.VITE_API_URL ?? '/api'
+      const url = `${apiUrl}/whatsapp/status/stream`
+
+      // EventSource doesn't support custom headers — use query param for auth
+      // NestJS will pick up Bearer from query if we add a custom approach,
+      // but simplest: use fetch-based SSE via ReadableStream
+      const response = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+      })
+
+      if (!response.ok || !response.body || cancelled) return
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (!cancelled) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          try {
+            const parsed = JSON.parse(line.slice(6))
+            if (parsed.type === 'ping') continue
+            onStatusChange(parsed)
+          } catch {
+            // ignore parse errors
+          }
+        }
+      }
+
+      reader.releaseLock()
+    }
+
+    connect().catch(() => {
+      // SSE connection failed — polling will handle it
+    })
+
+    return () => {
+      cancelled = true
+      eventSourceRef.current?.close()
+    }
+  }, [onStatusChange])
 }
 
 // ── Instance Card ────────────────────────────────────────────────────────────
@@ -231,7 +325,7 @@ function CreateInstanceModal({
 export function InstancesPage() {
   const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
-  const [qrModal, setQrModal] = useState<{ open: boolean; instanceId: string | null }>({ open: false, instanceId: null })
+  const [qrModal, setQrModal] = useState<{ open: boolean; instanceId: string | null; pairingCode: string | null }>({ open: false, instanceId: null, pairingCode: null })
   const [pollingEnabled, setPollingEnabled] = useState(false)
 
   const { data: instances = [], isLoading } = useQuery({
@@ -239,24 +333,40 @@ export function InstancesPage() {
     queryFn: () => api.get<WhatsAppInstance[]>('/whatsapp/instances'),
   })
 
-  // Poll QR status when modal is open
+  // SSE: real-time status updates (instant detection, no polling delay)
+  const handleSSEStatus = useCallback((data: { status: string; instanceId: string; phone?: string }) => {
+    // Update the cached status query for this instance
+    queryClient.setQueryData(['whatsapp', 'status', data.instanceId], (old: InstanceStatusResponse | undefined) => ({
+      ...old,
+      status: data.status as ConnectionStatus,
+      phone: data.phone,
+      instanceConfigured: true,
+      instanceId: data.instanceId,
+    }))
+    // Also invalidate instances list to refresh cards
+    void queryClient.invalidateQueries({ queryKey: ['whatsapp', 'instances'] })
+  }, [queryClient])
+
+  useStatusSSE(handleSSEStatus)
+
+  // Poll QR status when modal is open (fallback for SSE + QR code refresh)
   const { data: qrStatus } = useQuery({
     queryKey: ['whatsapp', 'status', qrModal.instanceId],
     queryFn: () => api.get<InstanceStatusResponse>(
       `/whatsapp/status?instanceId=${qrModal.instanceId}`,
     ),
     enabled: pollingEnabled && !!qrModal.instanceId,
-    refetchInterval: pollingEnabled ? 3000 : false,
+    refetchInterval: pollingEnabled ? 2000 : false,
   })
 
   const connectMutation = useMutation({
     mutationFn: (instanceId: string) =>
-      api.post<InstanceStatusResponse & { error?: string }>(
+      api.post<ConnectResponse>(
         `/whatsapp/connect?instanceId=${instanceId}`,
       ),
     onSuccess: (data, instanceId) => {
       if (data.status === 'QR_CODE') {
-        setQrModal({ open: true, instanceId })
+        setQrModal({ open: true, instanceId, pairingCode: data.pairingCode ?? null })
         setPollingEnabled(true)
       } else if (data.error) {
         toast.error(data.error)
@@ -289,11 +399,12 @@ export function InstancesPage() {
     },
   })
 
-  // Close QR modal when connected
+  // Close QR modal when connected (via polling or SSE)
   useEffect(() => {
     if (qrStatus?.status === 'CONNECTED') {
-      setQrModal({ open: false, instanceId: null })
+      setQrModal({ open: false, instanceId: null, pairingCode: null })
       setPollingEnabled(false)
+      toast.success('WhatsApp conectado!')
       void queryClient.invalidateQueries({ queryKey: ['whatsapp'] })
     }
   }, [qrStatus?.status, queryClient])
@@ -367,7 +478,7 @@ export function InstancesPage() {
       <Dialog
         open={qrModal.open}
         onOpenChange={(o) => {
-          setQrModal({ open: o, instanceId: o ? qrModal.instanceId : null })
+          setQrModal({ open: o, instanceId: o ? qrModal.instanceId : null, pairingCode: o ? qrModal.pairingCode : null })
           if (!o) setPollingEnabled(false)
         }}
       >
@@ -375,7 +486,7 @@ export function InstancesPage() {
           <DialogHeader>
             <DialogTitle>Conectar WhatsApp</DialogTitle>
             <DialogDescription>
-              Escaneie o QR code com seu celular para vincular o número
+              Escaneie o QR code ou use o código de vinculação
             </DialogDescription>
           </DialogHeader>
 
@@ -389,6 +500,10 @@ export function InstancesPage() {
               </div>
             )}
 
+            {(qrModal.pairingCode ?? qrStatus?.pairingCode) && (
+              <PairingCodeDisplay code={(qrModal.pairingCode ?? qrStatus?.pairingCode)!} />
+            )}
+
             {pollingEnabled && qrStatus?.status !== 'CONNECTED' && (
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-3">
                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -398,7 +513,7 @@ export function InstancesPage() {
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setQrModal({ open: false, instanceId: null })}>
+            <Button variant="outline" onClick={() => setQrModal({ open: false, instanceId: null, pairingCode: null })}>
               Fechar
             </Button>
             {qrModal.instanceId && (
