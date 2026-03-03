@@ -350,13 +350,14 @@ export function InstancesPage() {
   useStatusSSE(handleSSEStatus)
 
   // Poll QR status when modal is open (fallback for SSE + QR code refresh)
+  // 1.5s interval during QR display for fast scan detection
   const { data: qrStatus } = useQuery({
     queryKey: ['whatsapp', 'status', qrModal.instanceId],
     queryFn: () => api.get<InstanceStatusResponse>(
       `/whatsapp/status?instanceId=${qrModal.instanceId}`,
     ),
     enabled: pollingEnabled && !!qrModal.instanceId,
-    refetchInterval: pollingEnabled ? 2000 : false,
+    refetchInterval: pollingEnabled ? 1500 : false,
   })
 
   const connectMutation = useMutation({

@@ -147,13 +147,14 @@ export class WhatsAppWebhookController {
       }
 
       case 'connection.update': {
+        const t0 = Date.now();
         const parsed = EvolutionConnectionUpdateDataSchema.safeParse(payload.data);
         if (!parsed.success) {
           this.logger.warn(`Invalid connection.update payload: ${parsed.error.message}`);
           return;
         }
         const state = parsed.data.state;
-        this.logger.log(`Connection update: state=${state}`);
+        this.logger.log(`[TIMELINE] connection.update received: state=${state} tenant=${tenantSlug} at ${new Date().toISOString()}`);
 
         // Only persist terminal states (open / close) — ignore transient "connecting"
         if (state !== 'open' && state !== 'close') break;
@@ -170,7 +171,7 @@ export class WhatsAppWebhookController {
               : {}),
           },
         });
-        this.logger.log(`Instance(s) for ${tenantSlug} updated to ${newStatus}`);
+        this.logger.log(`[TIMELINE] DB updated to ${newStatus} for ${tenantSlug} (${Date.now() - t0}ms)`);
 
         // Emit events async (don't block webhook response)
         this.emitConnectionEvent(tenantSlug, state, parsed.data.number);

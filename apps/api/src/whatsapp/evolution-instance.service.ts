@@ -396,6 +396,18 @@ export class EvolutionInstanceService {
     this.logger.log(`Webhook configured: ${instanceName} -> ${webhookUrl}`);
   }
 
+  /** Lightweight: single GET to check connection state only (no phone lookup) */
+  async isConnected(instanceName: string): Promise<boolean> {
+    try {
+      const response = await this.makeRequest<{
+        instance: { state: string };
+      }>(`/instance/connectionState/${instanceName}`, 'GET');
+      return response.instance?.state === 'open';
+    } catch {
+      return false;
+    }
+  }
+
   async getConnectionStatusForInstance(
     instanceName: string,
   ): Promise<{ connected: boolean; phone?: string }> {
