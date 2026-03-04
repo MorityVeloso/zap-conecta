@@ -10,6 +10,7 @@ import {
   Inject,
   Logger,
   BadRequestException,
+  HttpException,
 } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
@@ -364,6 +365,9 @@ export class WhatsAppService {
   private handleError(error: unknown): never {
     const message = error instanceof Error ? error.message : 'Unknown error';
     this.logger.error(`WhatsApp error: ${message}`);
-    throw error instanceof Error ? error : new Error(message);
+    // Re-throw HttpExceptions as-is (e.g. EvolutionApiException → 502)
+    // Wrap generic errors in BadRequestException for proper HTTP status
+    if (error instanceof HttpException) throw error;
+    throw new BadRequestException(message);
   }
 }

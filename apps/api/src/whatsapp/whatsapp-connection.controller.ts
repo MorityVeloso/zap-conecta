@@ -63,40 +63,42 @@ export class WhatsAppConnectionController {
       return { status: 'DISCONNECTED' as const, instanceConfigured: false };
     }
 
-    if (instance.status === 'CONNECTED') {
-      this.clearQrTimeout(instance.instanceName);
-      return { status: 'CONNECTED' as const, phone: instance.phone, instanceConfigured: true, instanceId: instance.id };
-    }
-
-    // ── Active connection check ──────────────────────────────────────────
-    // DB says not connected, but the webhook might be delayed.
-    // Single lightweight GET to Evolution API connectionState (~200ms).
-    // If Evolution says "open", update DB immediately and return CONNECTED.
+    // ── Always verify with Evolution API (DB can be stale) ──────────────
     try {
       const connected = await this.evolutionInstanceService.isConnected(instance.instanceName);
       const tCheck = Date.now();
       this.logger.log(`[TIMELINE] Active check for ${instance.instanceName}: connected=${connected} (${tCheck - t0}ms)`);
 
       if (connected) {
-        // Connection detected via active check (faster than webhook!)
+        // Sync DB if needed
+        if (instance.status !== 'CONNECTED') {
+          await this.prisma.whatsAppInstance.update({
+            where: { id: instance.id },
+            data: { status: 'CONNECTED' },
+          });
+          this.eventEmitter.emit('whatsapp.instance.connected', {
+            tenantId: instance.tenantId,
+            tenantSlug: instance.tenantSlug,
+            instanceId: instance.id,
+          });
+        }
+        this.clearQrTimeout(instance.instanceName);
+        return { status: 'CONNECTED' as const, phone: instance.phone, instanceConfigured: true, instanceId: instance.id };
+      }
+
+      // Evolution says NOT connected — sync DB if needed
+      if (instance.status === 'CONNECTED') {
         await this.prisma.whatsAppInstance.update({
           where: { id: instance.id },
-          data: { status: 'CONNECTED' },
+          data: { status: 'DISCONNECTED' },
         });
-        this.clearQrTimeout(instance.instanceName);
-        this.logger.log(`[TIMELINE] Connection detected via ACTIVE POLL for ${instance.instanceName} — DB updated (${Date.now() - t0}ms total)`);
-
-        // Emit event for SSE clients
-        this.eventEmitter.emit('whatsapp.instance.connected', {
-          tenantId: instance.tenantId,
-          tenantSlug: instance.tenantSlug,
-          instanceId: instance.id,
-        });
-
-        return { status: 'CONNECTED' as const, phone: instance.phone, instanceConfigured: true, instanceId: instance.id };
       }
     } catch (err) {
       this.logger.warn(`Active connection check failed for ${instance.instanceName}: ${String(err)}`);
+      // Fallback to DB status if Evolution API is unreachable
+      if (instance.status === 'CONNECTED') {
+        return { status: 'CONNECTED' as const, phone: instance.phone, instanceConfigured: true, instanceId: instance.id };
+      }
     }
 
     // Not connected — check if there's a pending QR code
