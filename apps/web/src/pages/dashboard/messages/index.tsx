@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users, WifiOff, Plus } from 'lucide-react'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card } from '@/components/ui/card'
@@ -54,6 +54,7 @@ function exportConversationsCSV(conversations: ConversationSummary[]) {
 type SendType = 'text' | 'image' | 'document'
 
 function ConversationThread({ phone }: { phone: string }) {
+  const queryClient = useQueryClient()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [sendType, setSendType] = useState<SendType>('text')
   const [text, setText] = useState('')
@@ -103,8 +104,12 @@ function ConversationThread({ phone }: { phone: string }) {
       setMediaUrl('')
       setCaption('')
       setFileName('')
+      queryClient.invalidateQueries({ queryKey: ['messages', 'thread', phone] })
     },
-    onError: () => toast.error('Falha ao enviar mensagem'),
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : 'Falha ao enviar mensagem'
+      toast.error(msg)
+    },
   })
 
   const handleSend = (e: React.FormEvent) => {
