@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users, WifiOff } from 'lucide-react'
+import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users, WifiOff, Plus } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -356,6 +356,8 @@ function BulkSendTracker({ batchId, onDone }: { batchId: string; onDone: () => v
 export function MessagesPage() {
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null)
   const [activeBatchIds, setActiveBatchIds] = useState<string[]>([])
+  const [newConvPhone, setNewConvPhone] = useState('')
+  const [showNewConv, setShowNewConv] = useState(false)
 
   const removeBatch = (id: string) => setActiveBatchIds((prev) => prev.filter((b) => b !== id))
 
@@ -371,17 +373,55 @@ export function MessagesPage() {
       <div className="w-[320px] shrink-0 flex flex-col border-r border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <h1 className="text-base font-semibold">Mensagens</h1>
-          <button
-            type="button"
-            onClick={() => exportConversationsCSV(conversations)}
-            disabled={conversations.length === 0}
-            className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Exportar CSV"
-          >
-            <Download className="w-3.5 h-3.5" />
-            CSV
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => exportConversationsCSV(conversations)}
+              disabled={conversations.length === 0}
+              className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Exportar CSV"
+            >
+              <Download className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowNewConv(true)}
+              className="flex items-center gap-1 text-xs text-primary hover:underline font-medium"
+              title="Nova conversa"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Nova
+            </button>
+          </div>
         </div>
+
+        {/* New conversation input */}
+        {showNewConv && (
+          <form
+            className="flex gap-2 px-3 py-2 border-b border-border bg-muted/30"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const clean = newConvPhone.replace(/\D/g, '')
+              if (clean.length >= 10) {
+                setSelectedPhone(clean)
+                setShowNewConv(false)
+                setNewConvPhone('')
+              } else {
+                toast.error('Número inválido — use DDI+DDD+número (ex: 5511999998888)')
+              }
+            }}
+          >
+            <Input
+              autoFocus
+              value={newConvPhone}
+              onChange={(e) => setNewConvPhone(e.target.value)}
+              placeholder="5511999998888"
+              className="h-7 text-xs"
+            />
+            <Button type="submit" size="sm" className="h-7 text-xs px-2">Abrir</Button>
+            <Button type="button" variant="ghost" size="sm" className="h-7 text-xs px-2" onClick={() => { setShowNewConv(false); setNewConvPhone('') }}>✕</Button>
+          </form>
+        )}
 
         {/* Active bulk sends */}
         {activeBatchIds.map((id) => (
