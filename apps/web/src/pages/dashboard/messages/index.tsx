@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users } from 'lucide-react'
+import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users, WifiOff } from 'lucide-react'
 import { useQuery, useMutation } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -60,6 +60,14 @@ function ConversationThread({ phone }: { phone: string }) {
   const [mediaUrl, setMediaUrl] = useState('')
   const [caption, setCaption] = useState('')
   const [fileName, setFileName] = useState('')
+
+  const { data: connectionStatus } = useQuery({
+    queryKey: ['whatsapp', 'status'],
+    queryFn: () => api.get<{ status: string }>('/whatsapp/status'),
+    refetchInterval: 30_000,
+  })
+
+  const isConnected = connectionStatus?.status === 'CONNECTED'
 
   const { data, isLoading } = useQuery({
     queryKey: ['messages', 'thread', phone],
@@ -162,6 +170,14 @@ function ConversationThread({ phone }: { phone: string }) {
         )}
       </div>
 
+      {/* Disconnected banner */}
+      {connectionStatus && !isConnected && (
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs">
+          <WifiOff className="w-3.5 h-3.5 shrink-0" />
+          <span>WhatsApp desconectado — <a href="/dashboard/instances" className="underline font-medium">reconecte na página de Instâncias</a></span>
+        </div>
+      )}
+
       {/* Send form */}
       <div className="border-t border-border bg-card p-3">
         {/* Type tabs */}
@@ -192,7 +208,8 @@ function ConversationThread({ phone }: { phone: string }) {
               <Input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder="Digite uma mensagem…"
+                placeholder={isConnected === false ? 'WhatsApp desconectado' : 'Digite uma mensagem…'}
+                disabled={isConnected === false}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
@@ -200,7 +217,7 @@ function ConversationThread({ phone }: { phone: string }) {
                   }
                 }}
               />
-              <Button type="submit" size="sm" disabled={!text.trim() || sendMutation.isPending}>
+              <Button type="submit" size="sm" disabled={!text.trim() || sendMutation.isPending || isConnected === false}>
                 <Send className="size-4" />
               </Button>
             </div>
@@ -241,7 +258,8 @@ function ConversationThread({ phone }: { phone: string }) {
                     disabled={
                       !mediaUrl ||
                       (sendType === 'document' && !fileName) ||
-                      sendMutation.isPending
+                      sendMutation.isPending ||
+                      isConnected === false
                     }
                   >
                     <Send className="size-4" />
