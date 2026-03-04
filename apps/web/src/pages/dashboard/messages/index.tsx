@@ -68,7 +68,8 @@ function ConversationThread({ phone }: { phone: string }) {
     refetchInterval: 30_000,
   })
 
-  const isConnected = connectionStatus?.status === 'CONNECTED'
+  // Only disable when we have a confirmed non-CONNECTED status (not while loading)
+  const isDisconnected = connectionStatus !== undefined && connectionStatus.status !== 'CONNECTED'
 
   const { data, isLoading } = useQuery({
     queryKey: ['messages', 'thread', phone],
@@ -176,7 +177,7 @@ function ConversationThread({ phone }: { phone: string }) {
       </div>
 
       {/* Disconnected banner */}
-      {connectionStatus && !isConnected && (
+      {isDisconnected && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs">
           <WifiOff className="w-3.5 h-3.5 shrink-0" />
           <span>WhatsApp desconectado — <a href="/dashboard/instances" className="underline font-medium">reconecte na página de Instâncias</a></span>
@@ -213,8 +214,8 @@ function ConversationThread({ phone }: { phone: string }) {
               <Input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder={isConnected === false ? 'WhatsApp desconectado' : 'Digite uma mensagem…'}
-                disabled={isConnected === false}
+                placeholder={isDisconnected ? 'WhatsApp desconectado' : 'Digite uma mensagem…'}
+                disabled={isDisconnected}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
@@ -222,7 +223,7 @@ function ConversationThread({ phone }: { phone: string }) {
                   }
                 }}
               />
-              <Button type="submit" size="sm" disabled={!text.trim() || sendMutation.isPending || isConnected === false}>
+              <Button type="submit" size="sm" disabled={!text.trim() || sendMutation.isPending || isDisconnected}>
                 <Send className="size-4" />
               </Button>
             </div>
@@ -264,7 +265,7 @@ function ConversationThread({ phone }: { phone: string }) {
                       !mediaUrl ||
                       (sendType === 'document' && !fileName) ||
                       sendMutation.isPending ||
-                      isConnected === false
+                      isDisconnected
                     }
                   >
                     <Send className="size-4" />
