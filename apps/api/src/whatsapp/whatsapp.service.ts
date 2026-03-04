@@ -361,9 +361,9 @@ export class WhatsAppService {
     return { success: true, messageId: response.messageId };
   }
 
-  private handleError(error: unknown): MessageResult {
+  private handleError(error: unknown): never {
     const message = error instanceof Error ? error.message : 'Unknown error';
     this.logger.error(`WhatsApp error: ${message}`);
-    return { success: false, error: message };
+    throw error instanceof Error ? error : new Error(message);
   }
 }
