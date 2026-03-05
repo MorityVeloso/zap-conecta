@@ -77,6 +77,8 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     return instance?.instanceName ?? null;
   }
 
+  private static readonly REQUEST_TIMEOUT_MS = 30_000; // 30s — prevents hanging when Evolution API is stuck
+
   private async makeRequest<T>(
     endpoint: string,
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
@@ -89,6 +91,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
         method,
         headers: this.getHeaders(),
         body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(EvolutionApiClientService.REQUEST_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -103,6 +106,10 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
       if (!text) return {} as T;
       return JSON.parse(text) as T;
     } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        this.logger.error(`Evolution API timeout after ${EvolutionApiClientService.REQUEST_TIMEOUT_MS}ms: ${method} ${endpoint}`);
+        throw new EvolutionApiException(504, 'Evolution API request timed out');
+      }
       this.logger.error(`Evolution API request error: ${String(error)}`);
       throw error;
     }
