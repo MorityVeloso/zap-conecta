@@ -63,6 +63,9 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     };
   }
 
+  private instanceNameCache = new Map<string, { name: string | null; ts: number }>();
+  private static readonly CACHE_TTL_MS = 60_000; // 1 min
+
   private async getInstanceName(
     overrideSlug?: string,
   ): Promise<string | null> {
@@ -70,11 +73,18 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
       overrideSlug ??
       this.configService.get<string>('DEFAULT_INSTANCE_SLUG', 'default');
 
+    const cached = this.instanceNameCache.get(slug);
+    if (cached && Date.now() - cached.ts < EvolutionApiClientService.CACHE_TTL_MS) {
+      return cached.name;
+    }
+
     const instance = await this.prisma.whatsAppInstance.findFirst({
       where: { tenantSlug: slug },
     });
 
-    return instance?.instanceName ?? null;
+    const name = instance?.instanceName ?? null;
+    this.instanceNameCache.set(slug, { name, ts: Date.now() });
+    return name;
   }
 
   private static readonly REQUEST_TIMEOUT_MS = 30_000; // 30s — prevents hanging when Evolution API is stuck

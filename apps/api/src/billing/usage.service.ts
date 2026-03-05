@@ -26,21 +26,23 @@ export class UsageService {
 
   /** Throws 429 if tenant has exceeded plan's monthly message quota. */
   async assertBelowQuota(tenantId: string): Promise<void> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { plan: { select: { messagesPerMonth: true, displayName: true } } },
-    });
+    const period = this.currentPeriod();
+
+    const [tenant, usage] = await Promise.all([
+      this.prisma.tenant.findUnique({
+        where: { id: tenantId },
+        select: { plan: { select: { messagesPerMonth: true, displayName: true } } },
+      }),
+      this.prisma.usageRecord.findUnique({
+        where: { tenantId_period: { tenantId, period } },
+        select: { messagesSent: true },
+      }),
+    ]);
 
     if (!tenant) return; // safeguard
 
     const { messagesPerMonth, displayName } = tenant.plan;
     if (messagesPerMonth === -1) return; // unlimited plan
-
-    const period = this.currentPeriod();
-    const usage = await this.prisma.usageRecord.findUnique({
-      where: { tenantId_period: { tenantId, period } },
-      select: { messagesSent: true },
-    });
 
     const sent = usage?.messagesSent ?? 0;
     if (sent >= messagesPerMonth) {

@@ -61,6 +61,13 @@ export class WhatsAppSendController {
     return instance?.id ?? tenantSlug;
   }
 
+  /** Fire-and-forget: emit sent event without blocking the HTTP response */
+  private emitSentAsync(tenantSlug: string, tenantId: string, phone: string, type: string, meta: Record<string, unknown>, messageId?: string): void {
+    this.getInstanceId(tenantSlug)
+      .then(instanceId => this.whatsAppService.emitSent(tenantId, instanceId, phone, type, meta, messageId))
+      .catch(() => {}); // event emission is best-effort
+  }
+
   @Post('send/text')
   @ApiOperation({ summary: 'Send a text message via WhatsApp' })
   @ApiResponse({ status: 201, description: 'Text message sent' })
@@ -68,8 +75,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendTextMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'text', { text: dto.message }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'text', { text: dto.message }, result.messageId);
     }
     return result;
   }
@@ -81,8 +87,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendButtonMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'button', { title: dto.title }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'button', { title: dto.title }, result.messageId);
     }
     return result;
   }
@@ -94,8 +99,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendListMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'list', { title: dto.title }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'list', { title: dto.title }, result.messageId);
     }
     return result;
   }
@@ -107,8 +111,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendImageMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'image', { image: dto.image }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'image', { image: dto.image }, result.messageId);
     }
     return result;
   }
@@ -120,8 +123,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendDocumentMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'document', { document: dto.document }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'document', { document: dto.document }, result.messageId);
     }
     return result;
   }
@@ -133,8 +135,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendPixMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'pix', { amount: dto.amount }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'pix', { amount: dto.amount }, result.messageId);
     }
     return result;
   }
@@ -146,8 +147,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendTemplateMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'template', { templateId: dto.templateId }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'template', { templateId: dto.templateId }, result.messageId);
     }
     return result;
   }
@@ -159,8 +159,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendAudioMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'audio', { audio: dto.audio }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'audio', { audio: dto.audio }, result.messageId);
     }
     return result;
   }
@@ -172,8 +171,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendVideoMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'video', { video: dto.video }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'video', { video: dto.video }, result.messageId);
     }
     return result;
   }
@@ -185,8 +183,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendStickerMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'sticker', { sticker: dto.sticker }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'sticker', { sticker: dto.sticker }, result.messageId);
     }
     return result;
   }
@@ -198,8 +195,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendLocationMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'location', { latitude: dto.latitude, longitude: dto.longitude }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'location', { latitude: dto.latitude, longitude: dto.longitude }, result.messageId);
     }
     return result;
   }
@@ -211,8 +207,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendContactMessage(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'contact', { contacts: dto.contacts }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'contact', { contacts: dto.contacts }, result.messageId);
     }
     return result;
   }
@@ -231,8 +226,7 @@ export class WhatsAppSendController {
     await this.usageService.assertBelowQuota(tenant.tenantId);
     const result = await this.whatsAppService.sendPoll(withTenant(dto, tenant));
     if (result.success) {
-      const instanceId = await this.getInstanceId(tenant.tenantSlug);
-      this.whatsAppService.emitSent(tenant.tenantId, instanceId, dto.phone, 'poll', { name: dto.name, options: dto.options }, result.messageId);
+      this.emitSentAsync(tenant.tenantSlug, tenant.tenantId, dto.phone, 'poll', { name: dto.name, options: dto.options }, result.messageId);
     }
     return result;
   }
