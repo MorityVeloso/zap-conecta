@@ -100,14 +100,43 @@ function ConversationThread({ phone }: { phone: string }) {
         await api.post('/whatsapp/send/document', { phone, document: mediaUrl, fileName, caption: caption || undefined })
       }
     },
-    onSuccess: () => {
+    onMutate: async () => {
+      // Optimistic update: show message immediately
+      await queryClient.cancelQueries({ queryKey: ['messages', 'thread', phone] })
+      const prev = queryClient.getQueryData<{ data: Message[] }>(['messages', 'thread', phone])
+      const optimisticMsg: Message = {
+        id: `optimistic-${Date.now()}`,
+        phone,
+        type: sendType,
+        direction: 'OUTBOUND',
+        content: {
+          text: sendType === 'text' ? text.trim() : undefined,
+          caption: caption || undefined,
+          url: mediaUrl || undefined,
+          fileName: fileName || undefined,
+        },
+        createdAt: new Date().toISOString(),
+        status: 'SENDING',
+      }
+      queryClient.setQueryData<{ data: Message[] }>(
+        ['messages', 'thread', phone],
+        (old) => ({ data: [...(old?.data ?? []), optimisticMsg] }),
+      )
+      // Clear inputs immediately for snappy UX
       setText('')
       setMediaUrl('')
       setCaption('')
       setFileName('')
+      return { prev }
+    },
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', 'thread', phone] })
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, _vars, context) => {
+      // Rollback on error
+      if (context?.prev) {
+        queryClient.setQueryData(['messages', 'thread', phone], context.prev)
+      }
       const msg = err instanceof Error ? err.message : 'Falha ao enviar mensagem'
       toast.error(msg)
     },
@@ -145,17 +174,19 @@ function ConversationThread({ phone }: { phone: string }) {
         ) : (
           messages.map((msg) => {
             const isOut = msg.direction === 'OUTBOUND'
-            const text = msg.content?.text ?? msg.content?.caption ?? `[${msg.type}]`
+            const isSending = msg.status === 'SENDING'
+            const msgText = msg.content?.text ?? msg.content?.caption ?? `[${msg.type}]`
             return (
               <div key={msg.id} className={cn('flex gap-2 max-w-[80%]', isOut ? 'ml-auto flex-row-reverse' : '')}>
                 <div
                   className={cn(
                     'flex size-6 shrink-0 items-center justify-center rounded-full text-white text-[10px] mt-1',
                     isOut ? 'bg-primary' : 'bg-emerald-500',
+                    isSending && 'opacity-60',
                   )}
                   aria-hidden="true"
                 >
-                  {isOut ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+                  {isSending ? <Loader2 className="size-3 animate-spin" /> : isOut ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
                 </div>
                 <div
                   className={cn(
@@ -163,11 +194,12 @@ function ConversationThread({ phone }: { phone: string }) {
                     isOut
                       ? 'bg-primary text-primary-foreground rounded-tr-sm'
                       : 'bg-muted text-foreground rounded-tl-sm',
+                    isSending && 'opacity-70',
                   )}
                 >
-                  <p>{text}</p>
+                  <p>{msgText}</p>
                   <p className={cn('text-[10px] mt-0.5', isOut ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
-                    {formatRelativeTime(msg.createdAt)}
+                    {isSending ? 'Enviando…' : formatRelativeTime(msg.createdAt)}
                   </p>
                 </div>
               </div>
