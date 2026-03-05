@@ -26,6 +26,9 @@ import {
   EvolutionMessagesUpsertDataSchema,
   EvolutionMessagesUpdateDataSchema,
   EvolutionConnectionUpdateDataSchema,
+  EvolutionQrcodeUpdatedDataSchema,
+  EvolutionMessagesDeleteDataSchema,
+  EvolutionCallDataSchema,
 } from './dto/evolution-webhook.dto';
 import {
   transformEvolutionMessage,
@@ -33,6 +36,7 @@ import {
 } from './evolution-webhook.transformer';
 import { WhatsAppService } from './whatsapp.service';
 import { EvolutionInstanceService } from './evolution-instance.service';
+import { WhatsAppReconnectService } from './whatsapp-reconnect.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 @ApiTags('WhatsApp Webhooks')
@@ -46,6 +50,7 @@ export class WhatsAppWebhookController {
     private readonly evolutionInstanceService: EvolutionInstanceService,
     private readonly eventEmitter: EventEmitter2,
     private readonly prisma: PrismaService,
+    private readonly reconnectService: WhatsAppReconnectService,
   ) {}
 
   @Post('webhook/receive/:tenantSlug')
@@ -173,8 +178,78 @@ export class WhatsAppWebhookController {
         });
         this.logger.log(`[TIMELINE] DB updated to ${newStatus} for ${tenantSlug} (${Date.now() - t0}ms)`);
 
+        // On open: reset reconnect counter
+        if (state === 'open') {
+          const instanceName = typeof payload.instance === 'string' ? payload.instance : '';
+          this.evolutionInstanceService.resetReconnectAttempts(instanceName)
+            .catch((err) => this.logger.warn(`Failed to reset reconnect count: ${String(err)}`));
+        }
+
+        // On close: auto-reconnect with backoff
+        if (state === 'close') {
+          const instanceName = typeof payload.instance === 'string' ? payload.instance : '';
+          this.reconnectService.handleDisconnect(tenantSlug, instanceName)
+            .catch((err) => this.logger.error(`Reconnect handler error: ${String(err)}`));
+        }
+
         // Emit events async (don't block webhook response)
         this.emitConnectionEvent(tenantSlug, state, parsed.data.number);
+        break;
+      }
+
+      case 'qrcode.updated': {
+        const parsed = EvolutionQrcodeUpdatedDataSchema.safeParse(payload.data);
+        if (!parsed.success) {
+          this.logger.warn(`Invalid qrcode.updated payload: ${parsed.error.message}`);
+          return;
+        }
+        const qrCode = parsed.data.qrcode?.base64 ?? parsed.data.base64 ?? parsed.data.qrcode?.code ?? parsed.data.code ?? '';
+        const pairingCode = parsed.data.qrcode?.pairingCode ?? parsed.data.pairingCode;
+        if (qrCode) {
+          const inst = await this.evolutionInstanceService.findByTenant(tenantSlug);
+          this.eventEmitter.emit('whatsapp.instance.qr_updated', {
+            tenantId: inst?.tenantId ?? '',
+            tenantSlug,
+            instanceId: inst?.id,
+            qrCode,
+            pairingCode,
+          });
+        }
+        break;
+      }
+
+      case 'messages.delete': {
+        const parsed = EvolutionMessagesDeleteDataSchema.safeParse(payload.data);
+        if (!parsed.success) {
+          this.logger.warn(`Invalid messages.delete payload: ${parsed.error.message}`);
+          return;
+        }
+        this.logger.log(`Message deleted: remoteJid=${parsed.data.remoteJid ?? 'unknown'} id=${parsed.data.id ?? 'unknown'}`);
+        break;
+      }
+
+      case 'call': {
+        const parsed = EvolutionCallDataSchema.safeParse(payload.data);
+        if (!parsed.success) {
+          this.logger.warn(`Invalid call payload: ${parsed.error.message}`);
+          return;
+        }
+        this.logger.log(`Call received: from=${parsed.data.from ?? 'unknown'} video=${String(parsed.data.isVideo)} status=${parsed.data.status ?? 'unknown'}`);
+        const instCall = await this.evolutionInstanceService.findByTenant(tenantSlug);
+        if (instCall?.tenantId) {
+          this.eventEmitter.emit('whatsapp.call.received', {
+            tenantId: instCall.tenantId,
+            instanceId: instCall.id,
+            from: parsed.data.from ?? '',
+            isVideo: parsed.data.isVideo ?? false,
+            status: parsed.data.status ?? 'unknown',
+          });
+        }
+        break;
+      }
+
+      case 'send.message': {
+        this.logger.debug(`Send confirmation: instance=${String(payload.instance)}`);
         break;
       }
 

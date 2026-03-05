@@ -1,10 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { EvolutionInstanceService } from './evolution-instance.service';
+import { WhatsAppReconnectService } from './whatsapp-reconnect.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * Periodically checks for orphaned WhatsApp instances stuck in
  * "connecting" state and disconnects them to avoid WhatsApp rate limits.
+ * Also detects DISCONNECTED instances and triggers auto-reconnect.
  */
 @Injectable()
 export class WhatsAppOrphanCleanupService {
@@ -14,9 +17,12 @@ export class WhatsAppOrphanCleanupService {
   private readonly connectingSince = new Map<string, number>();
 
   private static readonly MAX_CONNECTING_MS = 5 * 60_000; // 5 min
+  private static readonly RECONNECT_COOLDOWN_MS = 90_000; // 90s — skip if recently attempted
 
   constructor(
     private readonly evolutionInstanceService: EvolutionInstanceService,
+    private readonly reconnectService: WhatsAppReconnectService,
+    private readonly prisma: PrismaService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -60,6 +66,53 @@ export class WhatsAppOrphanCleanupService {
       if (!activeNames.has(name)) {
         this.connectingSince.delete(name);
       }
+    }
+
+    // ── Health check: reconnect DISCONNECTED instances ──
+    await this.reconnectDisconnectedInstances(instances);
+  }
+
+  /**
+   * Find DB instances marked DISCONNECTED, verify against Evolution API,
+   * and trigger reconnect if truly disconnected.
+   */
+  private async reconnectDisconnectedInstances(
+    evolutionStates: { name: string; state: string }[],
+  ): Promise<void> {
+    const now = Date.now();
+    const stateByName = new Map(evolutionStates.map((i) => [i.name, i.state]));
+
+    const disconnected = await this.prisma.whatsAppInstance.findMany({
+      where: { status: 'DISCONNECTED' },
+      select: {
+        instanceName: true,
+        tenantSlug: true,
+        lastReconnectAt: true,
+        reconnectAttempts: true,
+      },
+    });
+
+    for (const inst of disconnected) {
+      // Skip if recently attempted (avoid race with webhook-triggered reconnect)
+      if (inst.lastReconnectAt && now - inst.lastReconnectAt.getTime() < WhatsAppOrphanCleanupService.RECONNECT_COOLDOWN_MS) {
+        continue;
+      }
+
+      const evolutionState = stateByName.get(inst.instanceName);
+
+      // If Evolution says it's open but DB says DISCONNECTED → sync DB
+      if (evolutionState === 'open') {
+        this.logger.log(`Health sync: ${inst.instanceName} is open on Evolution but DISCONNECTED in DB — syncing`);
+        await this.prisma.whatsAppInstance.updateMany({
+          where: { instanceName: inst.instanceName },
+          data: { status: 'CONNECTED', reconnectAttempts: 0 },
+        });
+        continue;
+      }
+
+      // Truly disconnected (or not found on Evolution) → trigger reconnect
+      this.reconnectService.handleDisconnect(inst.tenantSlug, inst.instanceName)
+        .catch((err) => this.logger.warn(`Health reconnect failed for ${inst.instanceName}: ${String(err)}`));
     }
   }
 }

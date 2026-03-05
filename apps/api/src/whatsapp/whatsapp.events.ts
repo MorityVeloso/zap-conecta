@@ -38,3 +38,26 @@ export interface WhatsAppMessageStatusEvent {
   status: string;
   phone?: string;
 }
+
+export interface WhatsAppInstanceNeedsQrEvent {
+  tenantId?: string;
+  tenantSlug: string;
+  instanceName: string;
+  instanceId?: string;
+}
+
+export interface WhatsAppQrUpdatedEvent {
+  tenantId: string;
+  tenantSlug: string;
+  instanceId?: string;
+  qrCode: string;
+  pairingCode?: string;
+}
+
+export interface WhatsAppCallReceivedEvent {
+  tenantId: string;
+  instanceId?: string;
+  from: string;
+  isVideo: boolean;
+  status: string;
+}

@@ -169,6 +169,43 @@ export type EvolutionConnectionUpdate = z.infer<
   typeof EvolutionConnectionUpdateSchema
 >;
 
+// ── qrcode.updated ──────────────────────────────────────────
+export const EvolutionQrcodeUpdatedDataSchema = z.object({
+  qrcode: z.object({
+    code: z.string().optional(),
+    base64: z.string().optional(),
+    pairingCode: z.string().optional(),
+  }).optional(),
+  // Some versions send flat fields
+  code: z.string().optional(),
+  base64: z.string().optional(),
+  pairingCode: z.string().optional(),
+});
+
+export type EvolutionQrcodeUpdatedData = z.infer<typeof EvolutionQrcodeUpdatedDataSchema>;
+
+// ── messages.delete ─────────────────────────────────────────
+export const EvolutionMessagesDeleteDataSchema = z.object({
+  id: z.string().optional(),
+  remoteJid: z.string().optional(),
+  fromMe: z.boolean().optional(),
+  participant: z.string().optional(),
+  instanceId: z.string().optional(),
+});
+
+export type EvolutionMessagesDeleteData = z.infer<typeof EvolutionMessagesDeleteDataSchema>;
+
+// ── call ────────────────────────────────────────────────────
+export const EvolutionCallDataSchema = z.object({
+  callId: z.string().optional(),
+  from: z.string().optional(),
+  isVideo: z.boolean().optional(),
+  status: z.string().optional(),
+  instanceId: z.string().optional(),
+});
+
+export type EvolutionCallData = z.infer<typeof EvolutionCallDataSchema>;
+
 // ── Generic webhook (for routing) ────────────────────────────
 export const EvolutionWebhookSchema = z.object({
   event: z.string(),

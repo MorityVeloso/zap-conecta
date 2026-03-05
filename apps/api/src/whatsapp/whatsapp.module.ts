@@ -20,6 +20,7 @@ import { BulkSendProcessor } from './bulk-send.processor';
 import { WebhookDeliveryProcessor } from './webhook-delivery.processor';
 import { WebhookDispatcherService } from './webhook-dispatcher.service';
 import { WhatsAppOrphanCleanupService } from './whatsapp-orphan-cleanup.service';
+import { WhatsAppReconnectService } from './whatsapp-reconnect.service';
 import { WHATSAPP_CLIENT } from './whatsapp-client.interface';
 import { WhatsAppConnectionController } from './whatsapp-connection.controller';
 import { WhatsAppInstanceController } from './whatsapp-instance.controller';
@@ -56,6 +57,7 @@ import { ZApiClientService } from './zapi-client.service';
     WebhookDeliveryProcessor,
     WebhookDispatcherService,
     WhatsAppOrphanCleanupService,
+    WhatsAppReconnectService,
     // Feature-flag provider: WHATSAPP_PROVIDER=zapi|evolution (default: evolution)
     {
       provide: WHATSAPP_CLIENT,

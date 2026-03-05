@@ -220,8 +220,24 @@ export class WhatsAppConnectionController {
         } as MessageEvent);
       };
 
+      const onNeedsQr = (data: { tenantId?: string; tenantSlug: string; instanceId?: string }) => {
+        if (data.tenantSlug !== tenant.tenantSlug) return;
+        subscriber.next({
+          data: JSON.stringify({ status: 'NEEDS_QR', instanceId: data.instanceId }),
+        } as MessageEvent);
+      };
+
+      const onQrUpdated = (data: { tenantId: string; tenantSlug: string; qrCode: string; pairingCode?: string }) => {
+        if (data.tenantSlug !== tenant.tenantSlug) return;
+        subscriber.next({
+          data: JSON.stringify({ status: 'QR_CODE', qrCode: data.qrCode, pairingCode: data.pairingCode }),
+        } as MessageEvent);
+      };
+
       this.eventEmitter.on('whatsapp.instance.connected', onConnected);
       this.eventEmitter.on('whatsapp.instance.disconnected', onDisconnected);
+      this.eventEmitter.on('whatsapp.instance.needs_qr', onNeedsQr);
+      this.eventEmitter.on('whatsapp.instance.qr_updated', onQrUpdated);
 
       // Keep-alive every 30s to prevent proxy/LB timeouts
       const keepAlive = setInterval(() => {
@@ -231,6 +247,8 @@ export class WhatsAppConnectionController {
       return () => {
         this.eventEmitter.off('whatsapp.instance.connected', onConnected);
         this.eventEmitter.off('whatsapp.instance.disconnected', onDisconnected);
+        this.eventEmitter.off('whatsapp.instance.needs_qr', onNeedsQr);
+        this.eventEmitter.off('whatsapp.instance.qr_updated', onQrUpdated);
         clearInterval(keepAlive);
       };
     });

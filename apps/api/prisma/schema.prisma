@@ -114,12 +114,14 @@ model WhatsAppInstance {
   displayName   String?                // nome amigável dado pelo usuário
   instanceName  String                 @unique
   instanceToken String?
-  status        WhatsAppInstanceStatus @default(DISCONNECTED)
-  phone         String? // número WhatsApp após conexão
-  webhookUrl    String?
-  metadata      Json?
-  createdAt     DateTime               @default(now())
-  updatedAt     DateTime               @updatedAt
+  status              WhatsAppInstanceStatus @default(DISCONNECTED)
+  phone               String? // número WhatsApp após conexão
+  webhookUrl          String?
+  metadata            Json?
+  reconnectAttempts   Int                    @default(0)
+  lastReconnectAt     DateTime?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
 
   messages Message[]
 
@@ -132,6 +134,7 @@ enum WhatsAppInstanceStatus {
   CONNECTING
   CONNECTED
   ERROR
+  NEEDS_QR
 }
 
 // ─── Mensagens ─────────────────────────────────────────────────────────────

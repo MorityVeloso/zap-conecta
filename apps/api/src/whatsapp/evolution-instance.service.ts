@@ -20,6 +20,7 @@ export enum WhatsAppInstanceStatus {
   DISCONNECTED = 'DISCONNECTED',
   CONNECTING   = 'CONNECTING',
   CONNECTED    = 'CONNECTED',
+  NEEDS_QR     = 'NEEDS_QR',
 }
 
 export interface WhatsAppInstance {
@@ -33,6 +34,8 @@ export interface WhatsAppInstance {
   phone: string | null;
   webhookUrl: string | null;
   metadata: unknown;
+  reconnectAttempts: number;
+  lastReconnectAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -83,23 +86,32 @@ export class EvolutionInstanceService {
   ): Promise<T> {
     const url = `${this.evolutionUrl}${endpoint}`;
 
-    const response = await fetch(url, {
-      method,
-      headers: this.getHeaders(),
-      body: body ? JSON.stringify(body) : undefined,
-    });
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: this.getHeaders(),
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(30_000),
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      this.logger.error(
-        `Evolution API error: ${String(response.status)} - ${errorText}`,
-      );
-      throw new EvolutionApiException(response.status, errorText);
+      if (!response.ok) {
+        const errorText = await response.text();
+        this.logger.error(
+          `Evolution API error: ${String(response.status)} - ${errorText}`,
+        );
+        throw new EvolutionApiException(response.status, errorText);
+      }
+
+      const text = await response.text();
+      if (!text) return {} as T;
+      return JSON.parse(text) as T;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'TimeoutError') {
+        this.logger.error(`Evolution API timeout: ${method} ${endpoint}`);
+        throw new EvolutionApiException(504, 'Evolution API request timed out');
+      }
+      throw error;
     }
-
-    const text = await response.text();
-    if (!text) return {} as T;
-    return JSON.parse(text) as T;
   }
 
   buildInstanceName(tenantSlug: string): string {
@@ -159,7 +171,7 @@ export class EvolutionInstanceService {
         url: webhookUrl,
         byEvents: false,
         base64: false,
-        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'],
+        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED', 'MESSAGES_DELETE', 'SEND_MESSAGE', 'CALL'],
       },
     });
 
@@ -181,6 +193,9 @@ export class EvolutionInstanceService {
     this.logger.log(
       `Instance created: ${instanceName} for tenant ${tenantSlug}`,
     );
+
+    // Configure recommended settings (non-fatal)
+    this.configureInstanceSettings(instanceName).catch(() => {});
 
     return {
       instanceName,
@@ -291,7 +306,7 @@ export class EvolutionInstanceService {
         url: webhookUrl,
         byEvents: false,
         base64: false,
-        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'],
+        events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED', 'MESSAGES_DELETE', 'SEND_MESSAGE', 'CALL'],
       },
     });
 
@@ -308,6 +323,9 @@ export class EvolutionInstanceService {
     });
 
     this.logger.log(`Instance re-created on Evolution API: ${instanceName}`);
+
+    // Configure recommended settings (non-fatal)
+    this.configureInstanceSettings(instanceName).catch(() => {});
 
     return {
       qrcode: createResponse.qrcode?.code,
@@ -385,7 +403,7 @@ export class EvolutionInstanceService {
       url: webhookUrl,
       byEvents: false,
       base64: false,
-      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE'],
+      events: ['MESSAGES_UPSERT', 'MESSAGES_UPDATE', 'CONNECTION_UPDATE', 'QRCODE_UPDATED', 'MESSAGES_DELETE', 'SEND_MESSAGE', 'CALL'],
     });
 
     await this.prisma.whatsAppInstance.updateMany({
@@ -528,5 +546,65 @@ export class EvolutionInstanceService {
     } catch {
       return instance.status as WhatsAppInstanceStatus;
     }
+  }
+
+  // ── Instance settings ──────────────────────────────────────
+
+  /** Configure recommended settings for a new/recreated instance (non-fatal). */
+  async configureInstanceSettings(instanceName: string): Promise<void> {
+    try {
+      await this.makeRequest(`/settings/set/${instanceName}`, 'POST', {
+        rejectCall: true,
+        msgCall: 'Não aceitamos chamadas por este número.',
+        groupsIgnore: false,
+        alwaysOnline: false,
+        readMessages: false,
+        readStatus: false,
+        syncFullHistory: false,
+      });
+      this.logger.log(`Settings configured for instance: ${instanceName}`);
+    } catch (error) {
+      this.logger.warn(`Failed to configure settings for ${instanceName}: ${String(error)}`);
+    }
+  }
+
+  // ── Auto-reconnect helpers ──────────────────────────────────
+
+  async attemptRestart(instanceName: string): Promise<boolean> {
+    try {
+      await this.makeRequest(`/instance/restart/${instanceName}`, 'PUT');
+      this.logger.log(`Auto-restart triggered: ${instanceName}`);
+      return true;
+    } catch (error) {
+      this.logger.warn(`Auto-restart failed for ${instanceName}: ${String(error)}`);
+      return false;
+    }
+  }
+
+  async incrementReconnectAttempts(instanceName: string): Promise<number> {
+    const inst = await this.prisma.whatsAppInstance.findFirst({
+      where: { instanceName },
+      select: { reconnectAttempts: true },
+    });
+    const newCount = (inst?.reconnectAttempts ?? 0) + 1;
+    await this.prisma.whatsAppInstance.updateMany({
+      where: { instanceName },
+      data: { reconnectAttempts: newCount, lastReconnectAt: new Date() },
+    });
+    return newCount;
+  }
+
+  async resetReconnectAttempts(instanceName: string): Promise<void> {
+    await this.prisma.whatsAppInstance.updateMany({
+      where: { instanceName },
+      data: { reconnectAttempts: 0, lastReconnectAt: null },
+    });
+  }
+
+  async markAsNeedsQr(instanceName: string): Promise<void> {
+    await this.prisma.whatsAppInstance.updateMany({
+      where: { instanceName },
+      data: { status: 'NEEDS_QR', reconnectAttempts: 0 },
+    });
   }
 }
