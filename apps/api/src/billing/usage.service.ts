@@ -16,6 +16,10 @@ import { PrismaService } from '@/prisma/prisma.service';
 export class UsageService {
   private readonly logger = new Logger(UsageService.name);
 
+  /** In-memory cache: tenantId → timestamp of last "below quota" confirmation */
+  private quotaPassCache = new Map<string, number>();
+  private static readonly QUOTA_CACHE_TTL_MS = 10_000; // 10s
+
   constructor(private readonly prisma: PrismaService) {}
 
   /** Current period string, e.g. '2026-02' */
@@ -26,6 +30,12 @@ export class UsageService {
 
   /** Throws 429 if tenant has exceeded plan's monthly message quota. */
   async assertBelowQuota(tenantId: string): Promise<void> {
+    // Fast path: skip DB if recently confirmed below quota
+    const cachedAt = this.quotaPassCache.get(tenantId);
+    if (cachedAt && Date.now() - cachedAt < UsageService.QUOTA_CACHE_TTL_MS) {
+      return;
+    }
+
     const period = this.currentPeriod();
 
     const [tenant, usage] = await Promise.all([
@@ -42,15 +52,22 @@ export class UsageService {
     if (!tenant) return; // safeguard
 
     const { messagesPerMonth, displayName } = tenant.plan;
-    if (messagesPerMonth === -1) return; // unlimited plan
+    if (messagesPerMonth === -1) {
+      this.quotaPassCache.set(tenantId, Date.now()); // unlimited — cache longer
+      return;
+    }
 
     const sent = usage?.messagesSent ?? 0;
     if (sent >= messagesPerMonth) {
+      this.quotaPassCache.delete(tenantId); // don't cache exceeded state
       throw new HttpException(
         `Quota mensal atingida (${sent}/${messagesPerMonth} mensagens — plano ${displayName}). Faça upgrade para continuar.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
+
+    // Below quota — cache so next sends skip DB
+    this.quotaPassCache.set(tenantId, Date.now());
   }
 
   /** Increments messagesSent counter for the current period. */

@@ -128,6 +128,16 @@ function ConversationThread({ phone }: { phone: string }) {
       return { prev }
     },
     onSuccess: () => {
+      // Immediately mark optimistic messages as sent (don't wait for refetch)
+      queryClient.setQueryData<{ data: Message[] }>(
+        ['messages', 'thread', phone],
+        (old) => ({
+          data: (old?.data ?? []).map((m) =>
+            m.status === 'SENDING' ? { ...m, status: 'SENT' } : m,
+          ),
+        }),
+      )
+      // Background refetch to sync with real server data
       queryClient.invalidateQueries({ queryKey: ['messages', 'thread', phone] })
     },
     onError: (err: unknown) => {

@@ -33,6 +33,11 @@ export class SupabaseJwtGuard implements CanActivate {
   private readonly logger = new Logger(SupabaseJwtGuard.name);
   private readonly supabase: SupabaseClient;
 
+  /** Token → TenantContext cache (avoids 2 Supabase round-trips per request) */
+  private authCache = new Map<string, { context: TenantContext; ts: number }>();
+  private static readonly AUTH_CACHE_TTL_MS = 60_000; // 60s
+  private static readonly AUTH_CACHE_MAX_SIZE = 500;
+
   constructor(private readonly configService: ConfigService) {
     this.supabase = createClient(
       this.configService.getOrThrow<string>('SUPABASE_URL'),
@@ -50,11 +55,19 @@ export class SupabaseJwtGuard implements CanActivate {
 
     const token = authHeader.slice(7);
 
+    // Fast path: return cached TenantContext (avoids getUser + profile query)
+    const cached = this.authCache.get(token);
+    if (cached && Date.now() - cached.ts < SupabaseJwtGuard.AUTH_CACHE_TTL_MS) {
+      request.tenantContext = cached.context;
+      return true;
+    }
+
     const supabase = this.supabase;
 
     const { data: { user }, error } = await supabase.auth.getUser(token);
 
     if (error || !user) {
+      this.authCache.delete(token); // evict stale entry
       this.logger.warn(`Invalid JWT: ${error?.message ?? 'no user'}`);
       throw new UnauthorizedException('Token inválido ou expirado');
     }
@@ -73,7 +86,7 @@ export class SupabaseJwtGuard implements CanActivate {
 
     const tenantData = (profile.tenants as unknown as { slug: string } | null);
 
-    request.tenantContext = {
+    const tenantContext: TenantContext = {
       userId: user.id,
       email: user.email ?? '',
       tenantId: profile.tenantId as string,
@@ -81,6 +94,23 @@ export class SupabaseJwtGuard implements CanActivate {
       role: profile.role as string,
     };
 
+    request.tenantContext = tenantContext;
+
+    // Cache for subsequent requests (evict old entries if over limit)
+    if (this.authCache.size >= SupabaseJwtGuard.AUTH_CACHE_MAX_SIZE) {
+      this.evictExpired();
+    }
+    this.authCache.set(token, { context: tenantContext, ts: Date.now() });
+
     return true;
+  }
+
+  private evictExpired(): void {
+    const now = Date.now();
+    for (const [key, val] of this.authCache) {
+      if (now - val.ts > SupabaseJwtGuard.AUTH_CACHE_TTL_MS) {
+        this.authCache.delete(key);
+      }
+    }
   }
 }
