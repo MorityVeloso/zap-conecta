@@ -1,5 +1,5 @@
 /**
- * WhatsAppWebhookController — receives Evolution API and Z-API webhooks.
+ * WhatsAppWebhookController — receives Evolution API webhooks.
  * All endpoints are @Public (no auth required — called by external providers).
  */
 import {
@@ -21,7 +21,6 @@ import {
   ApiParam,
 } from '@nestjs/swagger';
 import { Public } from '../auth/public.decorator';
-import type { ReceivedMessageWebhook, MessageStatusWebhook } from './dto/webhook.dto';
 import {
   EvolutionMessagesUpsertDataSchema,
   EvolutionMessagesUpdateDataSchema,
@@ -69,12 +68,8 @@ export class WhatsAppWebhookController {
   ): Promise<{ received: boolean }> {
     if (typeof payload.event === 'string' && typeof payload.instance === 'string') {
       await this.handleEvolutionWebhook(tenantSlug, payload);
-      return { received: true };
-    }
-
-    const zapiPayload = payload as unknown as ReceivedMessageWebhook;
-    if (zapiPayload.phone) {
-      await this.whatsAppService.handleReceivedMessage(tenantSlug, zapiPayload);
+    } else {
+      this.logger.debug(`Ignored non-Evolution payload for tenant ${tenantSlug}`);
     }
 
     return { received: true };
@@ -93,24 +88,10 @@ export class WhatsAppWebhookController {
 
     if (typeof payload.event === 'string' && typeof payload.instance === 'string') {
       await this.handleEvolutionWebhook(tenantSlug, payload);
-      return { received: true };
+    } else {
+      this.logger.debug(`Ignored non-Evolution payload for default tenant`);
     }
 
-    const zapiPayload = payload as unknown as ReceivedMessageWebhook;
-    if (zapiPayload.phone) {
-      await this.whatsAppService.handleReceivedMessage(tenantSlug, zapiPayload);
-    }
-
-    return { received: true };
-  }
-
-  @Post('webhook/status')
-  @Public()
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Webhook for WhatsApp message status updates' })
-  @ApiResponse({ status: 200, description: 'Status update received' })
-  webhookStatus(@Body() payload: MessageStatusWebhook): { received: boolean } {
-    this.whatsAppService.handleMessageStatus(payload);
     return { received: true };
   }
 

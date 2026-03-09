@@ -14,7 +14,6 @@ import {
 function makeWhatsAppServiceMock() {
   return {
     handleReceivedMessage: vi.fn().mockResolvedValue(undefined),
-    handleMessageStatus: vi.fn(),
   };
 }
 
@@ -66,10 +65,10 @@ describe('Inbound Webhook E2E', () => {
     expect(res.body).toEqual({ received: true });
   });
 
-  it('POST /whatsapp/webhook/status → 200 without auth', async () => {
+  it('POST /whatsapp/webhook/receive/:slug → ignores non-Evolution payload', async () => {
     const res = await req
-      .post('/whatsapp/webhook/status')
-      .send({ messageId: 'msg-1', status: 'delivered' });
+      .post('/whatsapp/webhook/receive/acme')
+      .send({ random: 'data', noEventOrInstance: true });
 
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ received: true });
