@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import { SubscriptionStatus } from '@prisma/client';
 import { BillingService } from '../billing.service';
+import type { BillingEmailService } from '../billing-email.service';
 import type { PrismaService } from '@/prisma/prisma.service';
 import type { ConfigService } from '@nestjs/config';
 
@@ -14,6 +15,7 @@ function makePrismaMock() {
     },
     tenant: {
       findUniqueOrThrow: vi.fn(),
+      findUnique: vi.fn(),
       update: vi.fn(),
     },
     subscription: {
@@ -39,6 +41,16 @@ function makeConfigMock() {
   } as unknown as ConfigService;
 }
 
+function makeEmailMock() {
+  return {
+    sendPaymentConfirmed: vi.fn().mockResolvedValue(undefined),
+    sendPaymentOverdue: vi.fn().mockResolvedValue(undefined),
+    sendPaymentRefunded: vi.fn().mockResolvedValue(undefined),
+    sendSubscriptionRenewed: vi.fn().mockResolvedValue(undefined),
+    sendSubscriptionCancelled: vi.fn().mockResolvedValue(undefined),
+  } as unknown as BillingEmailService;
+}
+
 // Intercept fetch globally in tests
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -46,6 +58,7 @@ vi.stubGlobal('fetch', mockFetch);
 describe('BillingService', () => {
   let service: BillingService;
   let prisma: ReturnType<typeof makePrismaMock>;
+  let emailMock: ReturnType<typeof makeEmailMock>;
 
   const TENANT_ID = 'tenant-1';
 
@@ -77,7 +90,8 @@ describe('BillingService', () => {
 
   beforeEach(() => {
     prisma = makePrismaMock();
-    service = new BillingService(prisma, makeConfigMock());
+    emailMock = makeEmailMock();
+    service = new BillingService(prisma, makeConfigMock(), emailMock);
     vi.clearAllMocks();
   });
 
@@ -176,6 +190,7 @@ describe('BillingService', () => {
       customerName: 'Test Company',
       cpf: '12345678901',
       billingType: 'PIX',
+      customerEmail: 'test@example.com',
     });
 
     expect(result.asaasSubscriptionId).toBe('sub-asaas-1');
@@ -185,6 +200,7 @@ describe('BillingService', () => {
           tenantId: TENANT_ID,
           asaasSubscriptionId: 'sub-asaas-1',
           asaasCustomerId: 'cus-asaas-1',
+          customerEmail: 'test@example.com',
         }),
       }),
     );
@@ -220,9 +236,11 @@ describe('BillingService', () => {
 
   // ── handleWebhook ───────────────────────────────────────────────
 
-  it('activates subscription on PAYMENT_CONFIRMED', async () => {
+  it('activates subscription on PAYMENT_CONFIRMED and sends email', async () => {
     vi.mocked(prisma.subscription.findUnique).mockResolvedValue({
       id: 'sub-1',
+      customerEmail: 'user@example.com',
+      plan: STARTER_PLAN,
     } as never);
     vi.mocked(prisma.subscription.update).mockResolvedValue({} as never);
 
@@ -242,9 +260,21 @@ describe('BillingService', () => {
         data: expect.objectContaining({ status: SubscriptionStatus.ACTIVE }),
       }),
     );
+
+    // Verify email was triggered (fire-and-forget)
+    expect(emailMock.sendPaymentConfirmed).toHaveBeenCalledWith(
+      'user@example.com',
+      'Starter',
+      9700,
+    );
   });
 
-  it('marks subscription PAST_DUE on PAYMENT_OVERDUE', async () => {
+  it('marks subscription PAST_DUE on PAYMENT_OVERDUE and sends email', async () => {
+    vi.mocked(prisma.subscription.findUnique).mockResolvedValue({
+      id: 'sub-1',
+      customerEmail: 'user@example.com',
+      plan: STARTER_PLAN,
+    } as never);
     vi.mocked(prisma.subscription.updateMany).mockResolvedValue({ count: 1 });
 
     await service.handleWebhook({
@@ -263,6 +293,11 @@ describe('BillingService', () => {
         data: expect.objectContaining({ status: SubscriptionStatus.PAST_DUE }),
       }),
     );
+
+    expect(emailMock.sendPaymentOverdue).toHaveBeenCalledWith(
+      'user@example.com',
+      'Starter',
+    );
   });
 
   it('ignores webhooks without externalReference', async () => {
@@ -278,5 +313,119 @@ describe('BillingService', () => {
 
     expect(prisma.subscription.findUnique).not.toHaveBeenCalled();
     expect(prisma.subscription.update).not.toHaveBeenCalled();
+  });
+
+  it('skips email when customerEmail is null', async () => {
+    vi.mocked(prisma.subscription.findUnique).mockResolvedValue({
+      id: 'sub-1',
+      customerEmail: null,
+      plan: STARTER_PLAN,
+    } as never);
+    vi.mocked(prisma.subscription.update).mockResolvedValue({} as never);
+
+    await service.handleWebhook({
+      event: 'PAYMENT_CONFIRMED',
+      payment: {
+        id: 'pay-1',
+        status: 'CONFIRMED',
+        value: 97,
+        externalReference: TENANT_ID,
+      },
+    });
+
+    expect(emailMock.sendPaymentConfirmed).not.toHaveBeenCalled();
+  });
+
+  // ── PAYMENT_REFUNDED ──────────────────────────────────────────
+
+  it('cancels subscription and reverts to free plan on PAYMENT_REFUNDED', async () => {
+    vi.mocked(prisma.subscription.findUnique).mockResolvedValue({
+      id: 'sub-1',
+      customerEmail: 'user@example.com',
+      plan: STARTER_PLAN,
+    } as never);
+    vi.mocked(prisma.plan.findFirst).mockResolvedValue(FREE_PLAN);
+    vi.mocked(prisma.subscription.updateMany).mockResolvedValue({ count: 1 });
+    vi.mocked(prisma.tenant.update).mockResolvedValue({} as never);
+
+    await service.handleWebhook({
+      event: 'PAYMENT_REFUNDED',
+      payment: {
+        id: 'pay-1',
+        status: 'REFUNDED',
+        value: 97,
+        externalReference: TENANT_ID,
+      },
+    });
+
+    expect(prisma.subscription.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: TENANT_ID },
+        data: expect.objectContaining({ status: SubscriptionStatus.CANCELLED }),
+      }),
+    );
+
+    expect(prisma.tenant.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: TENANT_ID },
+        data: { planId: FREE_PLAN.id },
+      }),
+    );
+
+    expect(emailMock.sendPaymentRefunded).toHaveBeenCalledWith(
+      'user@example.com',
+      'Starter',
+      9700,
+    );
+  });
+
+  // ── SUBSCRIPTION_RENEWED ──────────────────────────────────────
+
+  it('extends billing period on SUBSCRIPTION_RENEWED and sends email', async () => {
+    vi.mocked(prisma.subscription.findUnique).mockResolvedValue({
+      id: 'sub-1',
+      customerEmail: 'user@example.com',
+      plan: STARTER_PLAN,
+    } as never);
+    vi.mocked(prisma.subscription.update).mockResolvedValue({} as never);
+
+    await service.handleWebhook({
+      event: 'SUBSCRIPTION_RENEWED',
+      payment: {
+        id: 'pay-1',
+        status: 'CONFIRMED',
+        value: 97,
+        externalReference: TENANT_ID,
+      },
+    });
+
+    expect(prisma.subscription.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: TENANT_ID },
+        data: expect.objectContaining({ status: SubscriptionStatus.ACTIVE }),
+      }),
+    );
+
+    expect(emailMock.sendSubscriptionRenewed).toHaveBeenCalledWith(
+      'user@example.com',
+      'Starter',
+    );
+  });
+
+  // ── SUBSCRIPTION_CREATED / SUBSCRIPTION_UPDATED ───────────────
+
+  it('logs SUBSCRIPTION_CREATED without DB changes', async () => {
+    await service.handleWebhook({
+      event: 'SUBSCRIPTION_CREATED',
+      payment: {
+        id: 'pay-1',
+        status: 'ACTIVE',
+        value: 97,
+        externalReference: TENANT_ID,
+      },
+    });
+
+    expect(prisma.subscription.update).not.toHaveBeenCalled();
+    expect(prisma.subscription.updateMany).not.toHaveBeenCalled();
   });
 });

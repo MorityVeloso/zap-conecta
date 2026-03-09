@@ -19,6 +19,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
 import { ScheduledMessagesModule } from './scheduled/scheduled-messages.module';
 import { QueueModule } from './queue/queue.module';
 import { RedisModule } from './common/redis/redis.module';
+import { EmailModule } from './common/email/email.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { RedisModule } from './common/redis/redis.module';
     EventEmitterModule.forRoot({ wildcard: false, maxListeners: 20 }),
     QueueModule,
     RedisModule,
+    EmailModule,
     PrismaModule,
     TenantsModule,
     ApiKeysModule,

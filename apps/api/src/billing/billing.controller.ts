@@ -9,7 +9,6 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
@@ -69,7 +68,10 @@ export class BillingController {
     @CurrentTenant() tenant: TenantContext,
     @Body() dto: SubscribeDto,
   ) {
-    return this.billingService.subscribe(tenant.tenantId, dto);
+    return this.billingService.subscribe(tenant.tenantId, {
+      ...dto,
+      customerEmail: tenant.email,
+    });
   }
 
   @Patch('subscription')
@@ -97,7 +99,10 @@ export class BillingController {
 
   /**
    * Asaas webhook — public, validated by accessToken header.
-   * Configure in Asaas: Configurações → Integrações → Webhooks → URL
+   *
+   * CRITICAL: Always returns 200 OK. Asaas penalizes non-200 responses
+   * with retry storms and eventually disables the webhook endpoint.
+   * Auth failures are logged but still return 200.
    */
   @Post('webhook/asaas')
   @Public()
@@ -108,15 +113,25 @@ export class BillingController {
     @Body() payload: AsaasWebhookPayload,
     @Headers('asaas-access-token') headerToken?: string,
   ): Promise<{ received: boolean }> {
-    // Validate webhook token (body or header — reject if missing or wrong)
+    // Validate webhook token — log and return 200 even on failure (never 4xx)
     const expectedToken = this.config.get<string>('ASAAS_WEBHOOK_TOKEN');
     const receivedToken = payload.accessToken ?? headerToken;
     if (expectedToken && receivedToken !== expectedToken) {
-      this.logger.warn('Asaas webhook: invalid or missing accessToken');
-      throw new UnauthorizedException('Invalid webhook token');
+      this.logger.warn(
+        `Asaas webhook: invalid token (event=${payload.event}, ref=${payload.payment?.externalReference ?? 'none'})`,
+      );
+      return { received: true };
     }
 
-    await this.billingService.handleWebhook(payload);
+    try {
+      await this.billingService.handleWebhook(payload);
+    } catch (err) {
+      // Log but never let errors propagate to a non-200 response
+      this.logger.error(
+        `Asaas webhook handler error: ${err} (event=${payload.event}, ref=${payload.payment?.externalReference ?? 'none'})`,
+      );
+    }
+
     return { received: true };
   }
 }

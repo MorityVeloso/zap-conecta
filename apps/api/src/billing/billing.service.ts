@@ -6,6 +6,11 @@
  *  2. Criar subscription no Asaas com externalReference = tenantId
  *  3. Upsert subscription no DB + atualizar tenant.planId
  *  4. Webhook confirma pagamento → ACTIVE
+ *
+ * Patterns from modulo-pagamento-email:
+ *  - 30s timeout on all Asaas API calls
+ *  - Email notifications on billing lifecycle events
+ *  - Webhook resilience (always 200 OK, handled in controller)
  */
 
 import {
@@ -19,6 +24,7 @@ import { ConfigService } from '@nestjs/config';
 import type { Plan, Subscription } from '@prisma/client';
 import { SubscriptionStatus } from '@prisma/client';
 import { PrismaService } from '@/prisma/prisma.service';
+import { BillingEmailService } from './billing-email.service';
 
 // ── Asaas types ──────────────────────────────────────────────────────────────
 
@@ -58,6 +64,8 @@ export interface SubscribeDto {
   customerName: string;
   cpf: string;        // 11 dígitos sem formatação
   billingType: AsaasBillingType;
+  /** Injected by controller from JWT — not user-supplied. */
+  customerEmail?: string;
 }
 
 export interface ChangePlanDto {
@@ -88,6 +96,7 @@ export class BillingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly billingEmail: BillingEmailService,
   ) {}
 
   // ── Plans ─────────────────────────────────────────────────────
@@ -165,7 +174,7 @@ export class BillingService {
       dto.billingType,
     );
 
-    // 5. Upsert subscription in DB
+    // 5. Upsert subscription in DB (store customerEmail for webhook notifications)
     await this.prisma.subscription.upsert({
       where: { tenantId },
       create: {
@@ -173,12 +182,14 @@ export class BillingService {
         planId: plan.id,
         asaasSubscriptionId: asaasSub.id,
         asaasCustomerId,
+        customerEmail: dto.customerEmail ?? null,
         status: SubscriptionStatus.TRIALING,
       },
       update: {
         planId: plan.id,
         asaasSubscriptionId: asaasSub.id,
         asaasCustomerId,
+        customerEmail: dto.customerEmail ?? undefined,
         status: SubscriptionStatus.TRIALING,
         cancelledAt: null,
       },
@@ -286,17 +297,22 @@ export class BillingService {
     const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
     if (!sub?.asaasSubscriptionId) return [];
 
-    const apiKey = this.asaasApiKey();
-    const url = `${this.asaasBaseUrl()}/payments?subscription=${sub.asaasSubscriptionId}&limit=10`;
-    const res = await fetch(url, { headers: { 'access_token': apiKey } });
+    try {
+      const apiKey = this.asaasApiKey();
+      const url = `${this.asaasBaseUrl()}/payments?subscription=${sub.asaasSubscriptionId}&limit=10`;
+      const res = await this.asaasFetch(url, { headers: { 'access_token': apiKey } });
 
-    if (!res.ok) {
-      this.logger.warn(`Failed to fetch Asaas payments: ${res.status}`);
+      if (!res.ok) {
+        this.logger.warn(`Failed to fetch Asaas payments: ${res.status}`);
+        return [];
+      }
+
+      const data = await res.json() as { data?: unknown[] };
+      return data.data ?? [];
+    } catch (err) {
+      this.logger.warn(`Error fetching Asaas payments: ${err}`);
       return [];
     }
-
-    const data = await res.json() as { data?: unknown[] };
-    return data.data ?? [];
   }
 
   // ── Webhook handler ───────────────────────────────────────────
@@ -323,8 +339,23 @@ export class BillingService {
       return;
     }
 
+    if (event === 'PAYMENT_REFUNDED') {
+      await this.handlePaymentRefunded(tenantId, payment);
+      return;
+    }
+
     if (event === 'PAYMENT_DELETED' || event === 'SUBSCRIPTION_DELETED') {
       await this.handleSubscriptionDeleted(tenantId);
+      return;
+    }
+
+    if (event === 'SUBSCRIPTION_RENEWED') {
+      await this.handleSubscriptionRenewed(tenantId);
+      return;
+    }
+
+    if (event === 'SUBSCRIPTION_CREATED' || event === 'SUBSCRIPTION_UPDATED') {
+      this.logger.log(`Asaas subscription lifecycle: event=${event} tenant=${tenantId}`);
       return;
     }
 
@@ -335,7 +366,10 @@ export class BillingService {
     tenantId: string,
     payment: AsaasWebhookPayment,
   ): Promise<void> {
-    const sub = await this.prisma.subscription.findUnique({ where: { tenantId } });
+    const sub = await this.prisma.subscription.findUnique({
+      where: { tenantId },
+      include: { plan: true },
+    });
     if (!sub) {
       this.logger.warn(`Webhook payment confirmed but no subscription for tenant=${tenantId}`);
       return;
@@ -357,17 +391,111 @@ export class BillingService {
     this.logger.log(
       `Payment confirmed: tenant=${tenantId} amount=${payment.value}`,
     );
+
+    // Fire-and-forget email notification
+    if (sub.customerEmail) {
+      void this.billingEmail.sendPaymentConfirmed(
+        sub.customerEmail,
+        sub.plan.displayName,
+        Math.round(payment.value * 100),
+      );
+    }
   }
 
   private async handlePaymentOverdue(tenantId: string): Promise<void> {
+    const sub = await this.prisma.subscription.findUnique({
+      where: { tenantId },
+      include: { plan: true },
+    });
+
     await this.prisma.subscription.updateMany({
       where: { tenantId },
       data: { status: SubscriptionStatus.PAST_DUE },
     });
     this.logger.warn(`Payment overdue: tenant=${tenantId}`);
+
+    // Fire-and-forget email notification
+    if (sub?.customerEmail) {
+      void this.billingEmail.sendPaymentOverdue(
+        sub.customerEmail,
+        sub.plan.displayName,
+      );
+    }
+  }
+
+  private async handlePaymentRefunded(
+    tenantId: string,
+    payment: AsaasWebhookPayment,
+  ): Promise<void> {
+    const sub = await this.prisma.subscription.findUnique({
+      where: { tenantId },
+      include: { plan: true },
+    });
+
+    const freePlan = await this.prisma.plan.findFirst({ where: { name: 'free' } });
+    if (!freePlan) return;
+
+    await this.prisma.$transaction([
+      this.prisma.subscription.updateMany({
+        where: { tenantId },
+        data: { status: SubscriptionStatus.CANCELLED, cancelledAt: new Date() },
+      }),
+      this.prisma.tenant.update({
+        where: { id: tenantId },
+        data: { planId: freePlan.id },
+      }),
+    ]);
+
+    this.logger.warn(`Payment refunded: tenant=${tenantId} amount=${payment.value}`);
+
+    if (sub?.customerEmail) {
+      void this.billingEmail.sendPaymentRefunded(
+        sub.customerEmail,
+        sub.plan.displayName,
+        Math.round(payment.value * 100),
+      );
+    }
+  }
+
+  private async handleSubscriptionRenewed(tenantId: string): Promise<void> {
+    const sub = await this.prisma.subscription.findUnique({
+      where: { tenantId },
+      include: { plan: true },
+    });
+    if (!sub) {
+      this.logger.warn(`Webhook subscription renewed but no subscription for tenant=${tenantId}`);
+      return;
+    }
+
+    const now = new Date();
+    const periodEnd = new Date(now);
+    periodEnd.setMonth(periodEnd.getMonth() + 1);
+
+    await this.prisma.subscription.update({
+      where: { tenantId },
+      data: {
+        status: SubscriptionStatus.ACTIVE,
+        currentPeriodStart: now,
+        currentPeriodEnd: periodEnd,
+      },
+    });
+
+    this.logger.log(`Subscription renewed: tenant=${tenantId} plan=${sub.plan.name}`);
+
+    if (sub.customerEmail) {
+      void this.billingEmail.sendSubscriptionRenewed(
+        sub.customerEmail,
+        sub.plan.displayName,
+      );
+    }
   }
 
   private async handleSubscriptionDeleted(tenantId: string): Promise<void> {
+    const sub = await this.prisma.subscription.findUnique({
+      where: { tenantId },
+      include: { plan: true },
+    });
+
     const freePlan = await this.prisma.plan.findFirst({ where: { name: 'free' } });
     if (!freePlan) return;
 
@@ -382,9 +510,19 @@ export class BillingService {
       }),
     ]);
     this.logger.log(`Subscription deleted externally: tenant=${tenantId}`);
+
+    // Fire-and-forget email notification
+    if (sub?.customerEmail) {
+      void this.billingEmail.sendSubscriptionCancelled(
+        sub.customerEmail,
+        sub.plan.displayName,
+      );
+    }
   }
 
   // ── Asaas API helpers ─────────────────────────────────────────
+
+  private static readonly ASAAS_TIMEOUT_MS = 30_000;
 
   private asaasApiKey(): string {
     const key = this.config.get<string>('ASAAS_API_KEY');
@@ -399,13 +537,36 @@ export class BillingService {
       : 'https://api.asaas.com/v3';
   }
 
+  /** Fetch with AbortController timeout. */
+  private async asaasFetch(
+    url: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      BillingService.ASAAS_TIMEOUT_MS,
+    );
+
+    try {
+      return await fetch(url, { ...init, signal: controller.signal });
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') {
+        throw new Error(`Asaas API timeout (${BillingService.ASAAS_TIMEOUT_MS}ms): ${url}`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   private async createAsaasCustomer(
     apiKey: string,
     name: string,
     email: string,
     cpfCnpj: string,
   ): Promise<string> {
-    const res = await fetch(`${this.asaasBaseUrl()}/customers`, {
+    const res = await this.asaasFetch(`${this.asaasBaseUrl()}/customers`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -435,7 +596,7 @@ export class BillingService {
     nextDueDate.setDate(nextDueDate.getDate() + 1);
     const dueDateStr = nextDueDate.toISOString().slice(0, 10);
 
-    const res = await fetch(`${this.asaasBaseUrl()}/subscriptions`, {
+    const res = await this.asaasFetch(`${this.asaasBaseUrl()}/subscriptions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -464,7 +625,7 @@ export class BillingService {
     apiKey: string,
     subscriptionId: string,
   ): Promise<void> {
-    const res = await fetch(
+    const res = await this.asaasFetch(
       `${this.asaasBaseUrl()}/subscriptions/${subscriptionId}`,
       { method: 'DELETE', headers: { 'access_token': apiKey } },
     );
@@ -475,4 +636,5 @@ export class BillingService {
       );
     }
   }
+
 }

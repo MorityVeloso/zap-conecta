@@ -197,6 +197,7 @@ model Subscription {
   planId              String
   asaasSubscriptionId String?
   asaasCustomerId     String?
+  customerEmail       String?            /// Denormalized for webhook email notifications
   status              SubscriptionStatus @default(TRIALING)
   currentPeriodStart  DateTime?
   currentPeriodEnd    DateTime?
