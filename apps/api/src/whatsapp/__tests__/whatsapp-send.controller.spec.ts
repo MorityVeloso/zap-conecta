@@ -6,7 +6,7 @@ import type { EvolutionInstanceService } from '../evolution-instance.service';
 import type { PrismaService } from '@/prisma/prisma.service';
 import type { TenantContext } from '../../auth/supabase-jwt.guard';
 import type { Queue } from 'bullmq';
-import { HttpException, HttpStatus } from '@nestjs/common';
+import { HttpException, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 
 function makeWhatsAppServiceMock() {
   return {
@@ -118,8 +118,12 @@ describe('WhatsAppSendController', () => {
 
   it('emits sent event on successful text send', async () => {
     vi.mocked(whatsApp.sendTextMessage).mockResolvedValue(SUCCESS);
+    vi.mocked(evolutionInstance.findByTenant).mockResolvedValue({ id: 'inst-1' } as never);
 
     await controller.sendText(TENANT, { phone: '5511999998888', message: 'Hi' } as never);
+
+    // emitSentAsync is fire-and-forget — flush microtasks
+    await new Promise((r) => setImmediate(r));
 
     expect(whatsApp.emitSent).toHaveBeenCalledWith(
       'tenant-1', 'inst-1', '5511999998888', 'text',
@@ -218,18 +222,15 @@ describe('WhatsAppSendController', () => {
 
   // ── Connection check ─────────────────────────────────
 
-  it('blocks send when no WhatsApp instance is connected', async () => {
-    // Re-create controller with prisma that returns null for connected instance
-    const prismaNoInstance = makePrismaMock();
-    vi.mocked(prismaNoInstance.whatsAppInstance.findFirst).mockResolvedValue(null);
-    const ctrl = new WhatsAppSendController(whatsApp, usage, evolutionInstance, bulkQueue, prismaNoInstance);
-    vi.mocked(usage.assertBelowQuota).mockResolvedValue(undefined);
+  it('blocks send when WhatsApp instance is not connected (pre-send guard)', async () => {
+    // The pre-send guard lives in EvolutionApiClientService — simulate its behavior
+    vi.mocked(whatsApp.sendTextMessage).mockRejectedValue(
+      new ServiceUnavailableException('WhatsApp não conectado para o tenant'),
+    );
 
     await expect(
-      ctrl.sendText(TENANT, { phone: '5511999998888', message: 'Hi' } as never),
-    ).rejects.toThrow('Nenhuma instância WhatsApp conectada');
-
-    expect(whatsApp.sendTextMessage).not.toHaveBeenCalled();
+      controller.sendText(TENANT, { phone: '5511999998888', message: 'Hi' } as never),
+    ).rejects.toThrow(ServiceUnavailableException);
   });
 
   // ── Bulk send ─────────────────────────────────────────

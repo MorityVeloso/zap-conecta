@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Sse,
+  Header,
   Query,
   HttpCode,
   HttpStatus,
@@ -203,6 +204,9 @@ export class WhatsAppConnectionController {
   }
 
   @Sse('status/stream')
+  @Header('X-Accel-Buffering', 'no')
+  @Header('Cache-Control', 'no-cache, no-transform')
+  @Header('Connection', 'keep-alive')
   @ApiOperation({ summary: 'SSE stream for real-time connection status updates' })
   statusStream(@CurrentTenant() tenant: TenantContext): Observable<MessageEvent> {
     return new Observable((subscriber) => {

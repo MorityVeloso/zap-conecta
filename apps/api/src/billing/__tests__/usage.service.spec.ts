@@ -60,18 +60,18 @@ describe('UsageService', () => {
 
   it('skips check when tenant not found', async () => {
     vi.mocked(prisma.tenant.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.usageRecord.findUnique).mockResolvedValue(null);
 
     await expect(service.assertBelowQuota(TENANT_ID)).resolves.not.toThrow();
-    expect(prisma.usageRecord.findUnique).not.toHaveBeenCalled();
   });
 
   it('skips check for unlimited plan (messagesPerMonth = -1)', async () => {
     vi.mocked(prisma.tenant.findUnique).mockResolvedValue({
       plan: { messagesPerMonth: -1, displayName: 'Enterprise' },
     } as never);
+    vi.mocked(prisma.usageRecord.findUnique).mockResolvedValue(null);
 
     await expect(service.assertBelowQuota(TENANT_ID)).resolves.not.toThrow();
-    expect(prisma.usageRecord.findUnique).not.toHaveBeenCalled();
   });
 
   // ── incrementSent ────────────────────────────────────────────

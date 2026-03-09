@@ -17,7 +17,7 @@ function makeConfigServiceMock() {
 function makePrismaMock() {
   return {
     whatsAppInstance: {
-      findFirst: vi.fn().mockResolvedValue({ instanceName: 'acme-inst' }),
+      findFirst: vi.fn().mockResolvedValue({ instanceName: 'acme-inst', status: 'CONNECTED' }),
     },
   } as unknown as PrismaService;
 }
@@ -41,7 +41,7 @@ describe('EvolutionApiClientService', () => {
     vi.stubGlobal('fetch', mockFetch);
     vi.clearAllMocks();
     // Re-mock after clearAllMocks
-    vi.mocked(prisma.whatsAppInstance.findFirst).mockResolvedValue({ instanceName: 'acme-inst' } as never);
+    vi.mocked(prisma.whatsAppInstance.findFirst).mockResolvedValue({ instanceName: 'acme-inst', status: 'CONNECTED' } as never);
   });
 
   // ── makeRequest ─────────────────────────────────────
