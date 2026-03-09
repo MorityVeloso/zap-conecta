@@ -125,14 +125,12 @@ export class WhatsAppWebhookController {
       return;
     }
 
-    // Validate apikey if present (webhook signature check)
+    // Validate webhook apikey — mandatory when instance has a token configured
     const payloadApikey = typeof payload.apikey === 'string' ? payload.apikey : undefined;
-    if (payloadApikey) {
-      const valid = await this.validateWebhookApikey(tenantSlug, payloadApikey);
-      if (!valid) {
-        this.logger.warn(`Webhook apikey mismatch for tenant ${tenantSlug} — ignoring`);
-        return;
-      }
+    const authResult = await this.validateWebhookApikey(tenantSlug, payloadApikey);
+    if (!authResult) {
+      this.logger.warn(`Webhook auth failed for tenant ${tenantSlug} (apikey ${payloadApikey ? 'mismatch' : 'missing'}) — rejecting`);
+      return;
     }
 
     const event = payload.event as string;
@@ -290,19 +288,29 @@ export class WhatsAppWebhookController {
     }
   }
 
-  /** Validate webhook apikey against the instanceToken stored in DB (cached in Redis) */
-  private async validateWebhookApikey(tenantSlug: string, apikey: string): Promise<boolean> {
+  /**
+   * Validate webhook apikey against the instanceToken stored in DB (cached in Redis).
+   * - If instance has no token → allow (backwards compat / unconfigured)
+   * - If instance has token but payload has no apikey → reject
+   * - If both exist → compare
+   */
+  private async validateWebhookApikey(tenantSlug: string, apikey?: string): Promise<boolean> {
     const cacheKey = `webhook:token:${tenantSlug}`;
 
     // Check Redis cache first
     const cached = await this.redis.get(cacheKey);
-    if (cached) return cached === apikey;
+    if (cached) {
+      if (!apikey) return false; // Token exists but no apikey sent → reject
+      return cached === apikey;
+    }
 
     const inst = await this.evolutionInstanceService.findByTenant(tenantSlug);
     if (!inst?.instanceToken) return true; // No token stored — allow (backwards compat)
 
     // Cache for 5min
     await this.redis.setex(cacheKey, 300, inst.instanceToken);
+
+    if (!apikey) return false; // Token exists but no apikey sent → reject
     return inst.instanceToken === apikey;
   }
 

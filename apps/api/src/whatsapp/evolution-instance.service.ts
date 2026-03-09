@@ -219,8 +219,9 @@ export class EvolutionInstanceService {
       `Instance created: ${instanceName} for tenant ${tenantSlug}`,
     );
 
-    // Invalidate cached instance name so api-client picks up the new one
+    // Invalidate cached instance name + webhook token
     this.eventEmitter.emit('whatsapp.instance.cache_invalidate', { tenantSlug });
+    await this.redis.del(`webhook:token:${tenantSlug}`);
 
     // Configure recommended settings (non-fatal)
     this.configureInstanceSettings(instanceName).catch(() => {});
@@ -377,8 +378,9 @@ export class EvolutionInstanceService {
 
     this.logger.log(`Instance re-created on Evolution API: ${instanceName}`);
 
-    // Invalidate cached instance name
+    // Invalidate cached instance name + webhook token
     this.eventEmitter.emit('whatsapp.instance.cache_invalidate', { tenantSlug });
+    await this.redis.del(`webhook:token:${tenantSlug}`);
 
     // Configure recommended settings (non-fatal)
     this.configureInstanceSettings(instanceName).catch(() => {});

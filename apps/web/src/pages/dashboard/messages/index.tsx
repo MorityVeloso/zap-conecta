@@ -10,8 +10,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { cn } from '@/lib/utils'
-import { formatRelativeTime, formatPhone } from '@/lib/utils'
+import { cn, formatRelativeTime, formatPhone } from '@/lib/utils'
+import { validatePhone } from '@/lib/phone-validation'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -372,8 +372,9 @@ function BulkSendTracker({ batchId, onDone }: { batchId: string; onDone: () => v
   })
 
   useEffect(() => {
-    if (batch?.status === 'COMPLETED' || batch?.status === 'FAILED') {
-      const timer = setTimeout(onDone, 5000) // auto-dismiss after 5s
+    // Only auto-dismiss on COMPLETED — keep FAILED visible for user review
+    if (batch?.status === 'COMPLETED') {
+      const timer = setTimeout(onDone, 5000)
       return () => clearTimeout(timer)
     }
   }, [batch?.status, onDone])
@@ -395,6 +396,16 @@ function BulkSendTracker({ batchId, onDone }: { batchId: string; onDone: () => v
         >
           {batch.status === 'PROCESSING' ? `${batch.progress}%` : batch.status === 'COMPLETED' ? 'Concluído' : 'Falhou'}
         </Badge>
+        {isDone && (
+          <button
+            type="button"
+            onClick={onDone}
+            className="text-muted-foreground hover:text-foreground text-xs ml-1"
+            aria-label="Fechar"
+          >
+            ✕
+          </button>
+        )}
       </div>
       <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
         <div
@@ -460,13 +471,13 @@ export function MessagesPage() {
             className="flex gap-2 px-3 py-2 border-b border-border bg-muted/30"
             onSubmit={(e) => {
               e.preventDefault()
-              const clean = newConvPhone.replace(/\D/g, '')
-              if (clean.length >= 10) {
-                setSelectedPhone(clean)
+              const result = validatePhone(newConvPhone)
+              if (result.valid) {
+                setSelectedPhone(result.phone)
                 setShowNewConv(false)
                 setNewConvPhone('')
               } else {
-                toast.error('Número inválido — use DDI+DDD+número (ex: 5511999998888)')
+                toast.error(result.error)
               }
             }}
           >

@@ -39,15 +39,46 @@ interface ConnectResponse extends InstanceStatusResponse {
   error?: string
 }
 
-function QrCodeDisplay({ data }: { data: string }) {
+const QR_EXPIRY_SECONDS = 45
+
+function QrCodeDisplay({ data, generatedAt }: { data: string; generatedAt: number }) {
+  const [remaining, setRemaining] = useState(QR_EXPIRY_SECONDS)
+
+  useEffect(() => {
+    const elapsed = Math.floor((Date.now() - generatedAt) / 1000)
+    setRemaining(Math.max(0, QR_EXPIRY_SECONDS - elapsed))
+
+    const timer = setInterval(() => {
+      const now = Math.floor((Date.now() - generatedAt) / 1000)
+      const left = Math.max(0, QR_EXPIRY_SECONDS - now)
+      setRemaining(left)
+      if (left <= 0) clearInterval(timer)
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [generatedAt])
+
+  const expired = remaining <= 0
+
   const isBase64Image = data.startsWith('data:image') || data.length > 100
   if (isBase64Image) {
     const src = data.startsWith('data:') ? data : `data:image/png;base64,${data}`
     return (
       <div className="flex flex-col items-center gap-3">
-        <div className="bg-white p-4 rounded-xl shadow-inner">
+        <div className={`bg-white p-4 rounded-xl shadow-inner relative ${expired ? 'opacity-30' : ''}`}>
           <img src={src} alt="QR Code WhatsApp" className="w-56 h-56 object-contain" />
+          {expired && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className="bg-background/90 text-foreground font-semibold text-sm px-3 py-1.5 rounded-lg">
+                QR expirado
+              </span>
+            </div>
+          )}
         </div>
+        {!expired && (
+          <p className="text-xs text-muted-foreground text-center">
+            Expira em <span className="font-mono font-medium text-foreground">{remaining}s</span>
+          </p>
+        )}
         <p className="text-xs text-muted-foreground text-center max-w-[220px]">
           Abra o WhatsApp &rarr; Dispositivos vinculados &rarr; Adicionar dispositivo
         </p>
@@ -267,6 +298,7 @@ export function InstancesPage() {
   const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
   const [qrModal, setQrModal] = useState<{ open: boolean; instanceId: string | null; pairingCode: string | null }>({ open: false, instanceId: null, pairingCode: null })
+  const [qrGeneratedAt, setQrGeneratedAt] = useState(Date.now())
   const [pollingEnabled, setPollingEnabled] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
@@ -297,6 +329,7 @@ export function InstancesPage() {
     onSuccess: (data, instanceId) => {
       if (data.status === 'QR_CODE') {
         setQrModal({ open: true, instanceId, pairingCode: data.pairingCode ?? null })
+        setQrGeneratedAt(Date.now())
         setPollingEnabled(true)
       } else if (data.error) {
         toast.error(data.error)
@@ -332,6 +365,13 @@ export function InstancesPage() {
       toast.error(getErrorMessage(err))
     },
   })
+
+  // Reset QR timer when new QR code arrives from backend
+  useEffect(() => {
+    if (qrStatus?.qrCode) {
+      setQrGeneratedAt(Date.now())
+    }
+  }, [qrStatus?.qrCode])
 
   // Close QR modal when connected (via polling or SSE)
   useEffect(() => {
@@ -426,7 +466,7 @@ export function InstancesPage() {
 
           <div className="flex flex-col items-center py-4">
             {qrStatus?.qrCode ? (
-              <QrCodeDisplay data={qrStatus.qrCode} />
+              <QrCodeDisplay data={qrStatus.qrCode} generatedAt={qrGeneratedAt} />
             ) : (
               <div className="flex items-center gap-2 text-muted-foreground py-8">
                 <Loader2 className="w-5 h-5 animate-spin" />
