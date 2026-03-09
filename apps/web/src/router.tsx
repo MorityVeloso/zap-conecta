@@ -125,14 +125,6 @@ const apiKeysRoute = createRoute({
   ),
 })
 
-const messagesRoute = createRoute({
-  getParentRoute: () => dashboardLayout,
-  path: '/messages',
-  component: React.lazy(() =>
-    import('@/pages/dashboard/messages').then((m) => ({ default: m.MessagesPage })),
-  ),
-})
-
 const billingRoute = createRoute({
   getParentRoute: () => dashboardLayout,
   path: '/billing',
@@ -204,7 +196,6 @@ const routeTree = rootRoute.addChildren([
     instancesRoute,
     instancesNewRoute,
     apiKeysRoute,
-    messagesRoute,
     webhooksRoute,
     billingRoute,
     settingsRoute,

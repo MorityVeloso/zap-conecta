@@ -4,7 +4,6 @@ import {
   LayoutDashboard,
   Smartphone,
   Key,
-  MessageSquare,
   Webhook,
   CreditCard,
   Settings,
@@ -30,7 +29,6 @@ const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { label: 'Instâncias', href: '/dashboard/instances', icon: Smartphone },
   { label: 'API Keys', href: '/dashboard/api-keys', icon: Key },
-  { label: 'Mensagens', href: '/dashboard/messages', icon: MessageSquare },
   { label: 'Webhooks', href: '/dashboard/webhooks', icon: Webhook },
 ]
 
