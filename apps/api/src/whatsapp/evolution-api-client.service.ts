@@ -661,7 +661,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     const instanceName = await this.getInstanceName();
     if (!instanceName) return;
 
-    await this.makeRequest(`/instance/restart/${instanceName}`, 'PUT');
+    await this.makeRequest(`/instance/restart/${instanceName}`, 'POST');
     this.logger.log('Instance restarted');
   }
 

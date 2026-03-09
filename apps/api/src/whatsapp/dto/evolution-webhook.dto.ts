@@ -172,14 +172,14 @@ export type EvolutionConnectionUpdate = z.infer<
 // ── qrcode.updated ──────────────────────────────────────────
 export const EvolutionQrcodeUpdatedDataSchema = z.object({
   qrcode: z.object({
-    code: z.string().optional(),
-    base64: z.string().optional(),
-    pairingCode: z.string().optional(),
-  }).optional(),
+    code: z.string().nullish(),
+    base64: z.string().nullish(),
+    pairingCode: z.string().nullish(),
+  }).nullish(),
   // Some versions send flat fields
-  code: z.string().optional(),
-  base64: z.string().optional(),
-  pairingCode: z.string().optional(),
+  code: z.string().nullish(),
+  base64: z.string().nullish(),
+  pairingCode: z.string().nullish(),
 });
 
 export type EvolutionQrcodeUpdatedData = z.infer<typeof EvolutionQrcodeUpdatedDataSchema>;

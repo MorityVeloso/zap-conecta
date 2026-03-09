@@ -149,7 +149,7 @@ export type ConnectionStatusWebhook = z.infer<typeof ConnectionStatusWebhookSche
  * QR Code Webhook
  */
 export const QrCodeWebhookSchema = z.object({
-  qrcode: z.string(),
+  qrcode: z.string().nullable(),
   imageBase64: z.string().optional(),
 });
 

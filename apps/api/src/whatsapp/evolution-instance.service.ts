@@ -569,7 +569,7 @@ export class EvolutionInstanceService {
   }
 
   async restartInstance(instanceName: string): Promise<void> {
-    await this.makeRequest(`/instance/restart/${instanceName}`, 'PUT');
+    await this.makeRequest(`/instance/restart/${instanceName}`, 'POST');
     this.logger.log(`Instance restarted: ${instanceName}`);
   }
 
@@ -628,7 +628,7 @@ export class EvolutionInstanceService {
 
   async attemptRestart(instanceName: string): Promise<boolean> {
     try {
-      await this.makeRequest(`/instance/restart/${instanceName}`, 'PUT');
+      await this.makeRequest(`/instance/restart/${instanceName}`, 'POST');
       this.logger.log(`Auto-restart triggered: ${instanceName}`);
       return true;
     } catch (error) {
