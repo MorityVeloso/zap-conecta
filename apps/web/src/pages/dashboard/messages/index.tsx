@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users, WifiOff, Plus } from 'lucide-react'
+import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users, WifiOff, Plus, AlertCircle, RotateCcw } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { getErrorMessage } from '@/lib/error-messages'
+import { useWhatsAppStatus } from '@/hooks/use-whatsapp-status'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -62,14 +64,10 @@ function ConversationThread({ phone }: { phone: string }) {
   const [caption, setCaption] = useState('')
   const [fileName, setFileName] = useState('')
 
-  const { data: connectionStatus } = useQuery({
-    queryKey: ['whatsapp', 'status'],
-    queryFn: () => api.get<{ status: string }>('/whatsapp/status'),
-    refetchInterval: 30_000,
-  })
+  const { isConnected: whatsappConnected, isLoading: statusLoading } = useWhatsAppStatus()
 
   // Only disable when we have a confirmed non-CONNECTED status (not while loading)
-  const isDisconnected = connectionStatus !== undefined && connectionStatus.status !== 'CONNECTED'
+  const isDisconnected = !statusLoading && !whatsappConnected
 
   const { data, isLoading } = useQuery({
     queryKey: ['messages', 'thread', phone],
@@ -132,13 +130,17 @@ function ConversationThread({ phone }: { phone: string }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['messages', 'thread', phone] })
     },
-    onError: (err: unknown, _vars, context) => {
-      // Rollback on error
-      if (context?.prev) {
-        queryClient.setQueryData(['messages', 'thread', phone], context.prev)
-      }
-      const msg = err instanceof Error ? err.message : 'Falha ao enviar mensagem'
-      toast.error(msg)
+    onError: (err: unknown) => {
+      // Mark optimistic messages as FAILED (don't rollback — keep them visible)
+      queryClient.setQueryData<{ data: Message[] }>(
+        ['messages', 'thread', phone],
+        (old) => ({
+          data: (old?.data ?? []).map((m) =>
+            m.status === 'SENDING' ? { ...m, status: 'FAILED' } : m,
+          ),
+        }),
+      )
+      toast.error(getErrorMessage(err))
     },
   })
 
@@ -175,32 +177,51 @@ function ConversationThread({ phone }: { phone: string }) {
           messages.map((msg) => {
             const isOut = msg.direction === 'OUTBOUND'
             const isSending = msg.status === 'SENDING'
+            const isFailed = msg.status === 'FAILED'
             const msgText = msg.content?.text ?? msg.content?.caption ?? `[${msg.type}]`
             return (
               <div key={msg.id} className={cn('flex gap-2 max-w-[80%]', isOut ? 'ml-auto flex-row-reverse' : '')}>
                 <div
                   className={cn(
                     'flex size-6 shrink-0 items-center justify-center rounded-full text-white text-[10px] mt-1',
-                    isOut ? 'bg-primary' : 'bg-emerald-500',
+                    isFailed ? 'bg-red-500' : isOut ? 'bg-primary' : 'bg-emerald-500',
                     isSending && 'opacity-60',
                   )}
                   aria-hidden="true"
                 >
-                  {isSending ? <Loader2 className="size-3 animate-spin" /> : isOut ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+                  {isSending ? <Loader2 className="size-3 animate-spin" />
+                    : isFailed ? <AlertCircle className="size-3" />
+                    : isOut ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
                 </div>
                 <div
                   className={cn(
                     'rounded-2xl px-3 py-2 text-sm',
-                    isOut
-                      ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                      : 'bg-muted text-foreground rounded-tl-sm',
+                    isFailed
+                      ? 'bg-red-500/10 text-red-700 dark:text-red-400 rounded-tr-sm border border-red-200 dark:border-red-800'
+                      : isOut
+                        ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                        : 'bg-muted text-foreground rounded-tl-sm',
                     isSending && 'opacity-70',
                   )}
                 >
                   <p>{msgText}</p>
-                  <p className={cn('text-[10px] mt-0.5', isOut ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
-                    {isSending ? 'Enviando…' : formatRelativeTime(msg.createdAt)}
-                  </p>
+                  <div className={cn('flex items-center gap-1.5 text-[10px] mt-0.5', isOut && !isFailed ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
+                    {isSending && <span>Enviando...</span>}
+                    {isFailed && (
+                      <>
+                        <span className="text-red-500 font-medium">Falha no envio</span>
+                        <button
+                          type="button"
+                          onClick={() => sendMutation.mutate()}
+                          className="inline-flex items-center gap-0.5 text-red-500 hover:text-red-600 font-medium"
+                        >
+                          <RotateCcw className="size-2.5" />
+                          Tentar novamente
+                        </button>
+                      </>
+                    )}
+                    {!isSending && !isFailed && <span>{formatRelativeTime(msg.createdAt)}</span>}
+                  </div>
                 </div>
               </div>
             )

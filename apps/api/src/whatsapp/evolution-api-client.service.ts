@@ -5,11 +5,14 @@
  * PIX generation inlined (no external PixGeneratorService).
  */
 
-import { Injectable, Logger, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, Logger, HttpException, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { OnEvent } from '@nestjs/event-emitter';
 
 import { PrismaService } from '../prisma/prisma.service';
 import { EvolutionApiException } from '../common/exceptions/evolution-api.exception';
+import { retryWithBackoff } from '../common/utils/retry-with-backoff';
+import { CircuitBreaker } from '../common/utils/circuit-breaker';
 
 import type {
   SendTextMessageDto,
@@ -40,6 +43,7 @@ interface EvolutionApiConfig {
 export class EvolutionApiClientService implements WhatsAppClientInterface {
   private readonly logger = new Logger(EvolutionApiClientService.name);
   private readonly config: EvolutionApiConfig;
+  private readonly circuitBreaker = new CircuitBreaker('evolution-api');
 
   constructor(
     private readonly configService: ConfigService,
@@ -63,8 +67,8 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     };
   }
 
-  private instanceNameCache = new Map<string, { name: string | null; ts: number }>();
-  private static readonly CACHE_TTL_MS = 60_000; // 1 min
+  private instanceCache = new Map<string, { name: string; status: string; ts: number }>();
+  private static readonly CACHE_TTL_MS = 30_000; // 30s
 
   private async getInstanceName(
     overrideSlug?: string,
@@ -73,7 +77,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
       overrideSlug ??
       this.configService.get<string>('DEFAULT_INSTANCE_SLUG', 'default');
 
-    const cached = this.instanceNameCache.get(slug);
+    const cached = this.instanceCache.get(slug);
     if (cached && Date.now() - cached.ts < EvolutionApiClientService.CACHE_TTL_MS) {
       return cached.name;
     }
@@ -83,20 +87,79 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     });
 
     const name = instance?.instanceName ?? null;
-    this.instanceNameCache.set(slug, { name, ts: Date.now() });
+    // Only cache positive results — null means instance not yet created
+    if (name) {
+      this.instanceCache.set(slug, { name, status: instance?.status ?? 'DISCONNECTED', ts: Date.now() });
+    } else {
+      this.instanceCache.delete(slug);
+    }
     return name;
   }
 
-  private static readonly REQUEST_TIMEOUT_MS = 30_000; // 30s — prevents hanging when Evolution API is stuck
+  /** Pre-send check: returns instance name or throws if not connected */
+  private async getConnectedInstanceName(overrideSlug?: string): Promise<string> {
+    const slug =
+      overrideSlug ??
+      this.configService.get<string>('DEFAULT_INSTANCE_SLUG', 'default');
 
+    const name = await this.getInstanceName(slug);
+    if (!name) {
+      throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    }
+
+    const cached = this.instanceCache.get(slug);
+    if (cached && cached.status !== 'CONNECTED') {
+      throw new ServiceUnavailableException('WhatsApp não conectado. Escaneie o QR code para conectar.');
+    }
+
+    return name;
+  }
+
+  /** Clear cached instance data for a tenant (called on create/recreate) */
+  clearInstanceNameCache(slug: string): void {
+    this.instanceCache.delete(slug);
+  }
+
+  @OnEvent('whatsapp.instance.cache_invalidate', { async: true })
+  onCacheInvalidate(event: { tenantSlug: string }): void {
+    this.clearInstanceNameCache(event.tenantSlug);
+    this.logger.debug(`Cache invalidated for tenant ${event.tenantSlug}`);
+  }
+
+  @OnEvent('whatsapp.instance.connected', { async: true })
+  onInstanceConnected(event: { tenantSlug?: string }): void {
+    if (event.tenantSlug) {
+      const cached = this.instanceCache.get(event.tenantSlug);
+      if (cached) cached.status = 'CONNECTED';
+    }
+  }
+
+  @OnEvent('whatsapp.instance.disconnected', { async: true })
+  onInstanceDisconnected(event: { tenantSlug?: string }): void {
+    if (event.tenantSlug) {
+      const cached = this.instanceCache.get(event.tenantSlug);
+      if (cached) cached.status = 'DISCONNECTED';
+    }
+  }
+
+  private static readonly REQUEST_TIMEOUT_MS = 30_000; // 30s
+
+  /**
+   * Central HTTP method — all Evolution API calls go through here.
+   * Wrapped with circuit breaker (fail-fast when API is down) and
+   * optional retry with exponential backoff (GETs only by default).
+   * POST message sends are NEVER retried to avoid duplicates.
+   */
   private async makeRequest<T>(
     endpoint: string,
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     body?: unknown,
+    options?: { retryable?: boolean },
   ): Promise<T> {
     const url = `${this.config.baseUrl}${endpoint}`;
+    const retryable = options?.retryable ?? method === 'GET';
 
-    try {
+    const doFetch = async (): Promise<T> => {
       const response = await fetch(url, {
         method,
         headers: this.getHeaders(),
@@ -113,14 +176,22 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
       }
 
       const text = await response.text();
-      if (!text) return {} as T;
+      if (!text) {
+        this.logger.warn(`Empty response body: ${method} ${endpoint}`);
+        return {} as T;
+      }
       return JSON.parse(text) as T;
+    };
+
+    try {
+      return await this.circuitBreaker.execute(() =>
+        retryable ? retryWithBackoff(doFetch) : doFetch(),
+      );
     } catch (error) {
       if (error instanceof DOMException && error.name === 'TimeoutError') {
         this.logger.error(`Evolution API timeout after ${EvolutionApiClientService.REQUEST_TIMEOUT_MS}ms: ${method} ${endpoint}`);
         throw new EvolutionApiException(504, 'Evolution API request timed out');
       }
-      this.logger.error(`Evolution API request error: ${String(error)}`);
       throw error;
     }
   }
@@ -259,8 +330,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendTextMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const body: Record<string, unknown> = { number: dto.phone, text: dto.message };
     const quoted = this.buildQuotedKey(dto);
@@ -280,8 +350,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendButtonMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendButtons/${instanceName}`,
@@ -307,8 +376,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendListMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendList/${instanceName}`,
@@ -338,8 +406,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendImageMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const body: Record<string, unknown> = {
       number: dto.phone,
@@ -364,8 +431,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendDocumentMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const body: Record<string, unknown> = {
       number: dto.phone,
@@ -404,8 +470,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendAudioMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const endpoint = dto.ptt
       ? `/message/sendWhatsAppAudio/${instanceName}`
@@ -431,8 +496,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendVideoMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const body: Record<string, unknown> = {
       number: dto.phone,
@@ -457,8 +521,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendStickerMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendSticker/${instanceName}`,
@@ -474,8 +537,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendLocationMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendLocation/${instanceName}`,
@@ -497,8 +559,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendContactMessageDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendContact/${instanceName}`,
@@ -523,8 +584,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendReactionDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendReaction/${instanceName}`,
@@ -547,8 +607,7 @@ export class EvolutionApiClientService implements WhatsAppClientInterface {
     dto: SendPollDto,
   ): Promise<WhatsAppClientResponse> {
     const slug = (dto as { tenantSlug?: string }).tenantSlug;
-    const instanceName = await this.getInstanceName(slug);
-    if (!instanceName) throw new HttpException('No WhatsApp instance configured for this tenant', HttpStatus.UNPROCESSABLE_ENTITY);
+    const instanceName = await this.getConnectedInstanceName(slug);
 
     const response = await this.makeRequest<{ key?: { id?: string } }>(
       `/message/sendPoll/${instanceName}`,

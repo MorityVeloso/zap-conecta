@@ -11,10 +11,14 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomBytes } from 'crypto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EvolutionApiException } from '../common/exceptions/evolution-api.exception';
 import { ConfigService } from '@nestjs/config';
+import { retryWithBackoff } from '../common/utils/retry-with-backoff';
+import { CircuitBreaker } from '../common/utils/circuit-breaker';
 
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../common/redis/redis.service';
 
 export enum WhatsAppInstanceStatus {
   DISCONNECTED = 'DISCONNECTED',
@@ -52,10 +56,13 @@ export class EvolutionInstanceService {
   private readonly evolutionUrl: string;
   private readonly evolutionApiKey: string;
   private readonly webhookBaseUrl: string;
+  private readonly circuitBreaker = new CircuitBreaker('evolution-instance');
 
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly redis: RedisService,
   ) {
     this.evolutionUrl = this.configService.get<string>(
       'EVOLUTION_API_URL',
@@ -79,19 +86,28 @@ export class EvolutionInstanceService {
     };
   }
 
+  private static readonly REQUEST_TIMEOUT_MS = 30_000;
+
+  /**
+   * Central HTTP method with circuit breaker + retry.
+   * Instance management operations (GET, PUT restart) are retryable.
+   * POST create is NOT retried (could create duplicates).
+   */
   private async makeRequest<T>(
     endpoint: string,
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
     body?: unknown,
+    options?: { retryable?: boolean },
   ): Promise<T> {
     const url = `${this.evolutionUrl}${endpoint}`;
+    const retryable = options?.retryable ?? (method === 'GET' || method === 'PUT' || method === 'DELETE');
 
-    try {
+    const doFetch = async (): Promise<T> => {
       const response = await fetch(url, {
         method,
         headers: this.getHeaders(),
         body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(30_000),
+        signal: AbortSignal.timeout(EvolutionInstanceService.REQUEST_TIMEOUT_MS),
       });
 
       if (!response.ok) {
@@ -103,8 +119,17 @@ export class EvolutionInstanceService {
       }
 
       const text = await response.text();
-      if (!text) return {} as T;
+      if (!text) {
+        this.logger.warn(`Empty response body: ${method} ${endpoint}`);
+        return {} as T;
+      }
       return JSON.parse(text) as T;
+    };
+
+    try {
+      return await this.circuitBreaker.execute(() =>
+        retryable ? retryWithBackoff(doFetch) : doFetch(),
+      );
     } catch (error) {
       if (error instanceof DOMException && error.name === 'TimeoutError') {
         this.logger.error(`Evolution API timeout: ${method} ${endpoint}`);
@@ -194,6 +219,9 @@ export class EvolutionInstanceService {
       `Instance created: ${instanceName} for tenant ${tenantSlug}`,
     );
 
+    // Invalidate cached instance name so api-client picks up the new one
+    this.eventEmitter.emit('whatsapp.instance.cache_invalidate', { tenantSlug });
+
     // Configure recommended settings (non-fatal)
     this.configureInstanceSettings(instanceName).catch(() => {});
 
@@ -235,6 +263,7 @@ export class EvolutionInstanceService {
     tenantSlug: string,
     tenantId: string,
   ): Promise<WhatsAppInstance> {
+    // Fast path: check without lock
     const existing = await this.prisma.whatsAppInstance.findFirst({
       where: { tenantSlug },
     });
@@ -255,13 +284,37 @@ export class EvolutionInstanceService {
       return existing as WhatsAppInstance;
     }
 
-    await this.createInstance(tenantSlug, tenantId);
+    // Distributed lock to prevent race condition (two concurrent requests creating duplicates)
+    const lockKey = `instance:lock:${tenantSlug}`;
+    const acquired = await this.redis.setnx(lockKey, '1', 10);
 
-    const created = await this.prisma.whatsAppInstance.findFirst({
-      where: { tenantSlug },
-    });
+    if (!acquired) {
+      // Another process is creating — wait and retry findFirst
+      await new Promise((r) => setTimeout(r, 500));
+      const retry = await this.prisma.whatsAppInstance.findFirst({
+        where: { tenantSlug },
+      });
+      if (retry) return retry as WhatsAppInstance;
+      throw new BadRequestException('Instance creation in progress, try again');
+    }
 
-    return created as WhatsAppInstance;
+    try {
+      // Double-check inside lock
+      const doubleCheck = await this.prisma.whatsAppInstance.findFirst({
+        where: { tenantSlug },
+      });
+      if (doubleCheck) return doubleCheck as WhatsAppInstance;
+
+      await this.createInstance(tenantSlug, tenantId);
+
+      const created = await this.prisma.whatsAppInstance.findFirst({
+        where: { tenantSlug },
+      });
+
+      return created as WhatsAppInstance;
+    } finally {
+      await this.redis.del(lockKey);
+    }
   }
 
   /** Check if an instance exists on Evolution API without throwing */
@@ -323,6 +376,9 @@ export class EvolutionInstanceService {
     });
 
     this.logger.log(`Instance re-created on Evolution API: ${instanceName}`);
+
+    // Invalidate cached instance name
+    this.eventEmitter.emit('whatsapp.instance.cache_invalidate', { tenantSlug });
 
     // Configure recommended settings (non-fatal)
     this.configureInstanceSettings(instanceName).catch(() => {});

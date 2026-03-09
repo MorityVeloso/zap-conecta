@@ -1,9 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Smartphone, Plus, RefreshCw, Wifi, WifiOff, Loader2, Trash2, QrCode, Copy, Check } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { supabase } from '@/lib/supabase'
+import { getErrorMessage } from '@/lib/error-messages'
+import { useWhatsAppStatus } from '@/hooks/use-whatsapp-status'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
+import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 
 type ConnectionStatus = 'CONNECTED' | 'QR_CODE' | 'DISCONNECTED'
 
@@ -84,68 +86,7 @@ function PairingCodeDisplay({ code }: { code: string }) {
   )
 }
 
-// ── SSE hook for real-time status ───────────────────────────────────────────
-
-function useStatusSSE(onStatusChange: (data: { status: string; instanceId: string; phone?: string }) => void) {
-  const eventSourceRef = useRef<EventSource | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-
-    const connect = async () => {
-      const { data } = await supabase.auth.getSession()
-      const token = data.session?.access_token
-      if (!token || cancelled) return
-
-      const apiUrl = import.meta.env.VITE_API_URL ?? '/api'
-      const url = `${apiUrl}/whatsapp/status/stream`
-
-      // EventSource doesn't support custom headers — use query param for auth
-      // NestJS will pick up Bearer from query if we add a custom approach,
-      // but simplest: use fetch-based SSE via ReadableStream
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
-      })
-
-      if (!response.ok || !response.body || cancelled) return
-
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-
-      while (!cancelled) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          try {
-            const parsed = JSON.parse(line.slice(6))
-            if (parsed.type === 'ping') continue
-            onStatusChange(parsed)
-          } catch {
-            // ignore parse errors
-          }
-        }
-      }
-
-      reader.releaseLock()
-    }
-
-    connect().catch(() => {
-      // SSE connection failed — polling will handle it
-    })
-
-    return () => {
-      cancelled = true
-      eventSourceRef.current?.close()
-    }
-  }, [onStatusChange])
-}
+// SSE is now handled centrally by useWhatsAppStatus hook
 
 // ── Instance Card ────────────────────────────────────────────────────────────
 
@@ -327,27 +268,15 @@ export function InstancesPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [qrModal, setQrModal] = useState<{ open: boolean; instanceId: string | null; pairingCode: string | null }>({ open: false, instanceId: null, pairingCode: null })
   const [pollingEnabled, setPollingEnabled] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
 
   const { data: instances = [], isLoading } = useQuery({
     queryKey: ['whatsapp', 'instances'],
     queryFn: () => api.get<WhatsAppInstance[]>('/whatsapp/instances'),
   })
 
-  // SSE: real-time status updates (instant detection, no polling delay)
-  const handleSSEStatus = useCallback((data: { status: string; instanceId: string; phone?: string }) => {
-    // Update the cached status query for this instance
-    queryClient.setQueryData(['whatsapp', 'status', data.instanceId], (old: InstanceStatusResponse | undefined) => ({
-      ...old,
-      status: data.status as ConnectionStatus,
-      phone: data.phone,
-      instanceConfigured: true,
-      instanceId: data.instanceId,
-    }))
-    // Also invalidate instances list to refresh cards
-    void queryClient.invalidateQueries({ queryKey: ['whatsapp', 'instances'] })
-  }, [queryClient])
-
-  useStatusSSE(handleSSEStatus)
+  // SSE is handled centrally by useWhatsAppStatus (in layout)
+  useWhatsAppStatus()
 
   // Poll QR status when modal is open (fallback for SSE + QR code refresh)
   // 1.5s interval during QR display for fast scan detection
@@ -376,7 +305,7 @@ export function InstancesPage() {
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Erro ao conectar')
+      toast.error(getErrorMessage(err))
     },
   })
 
@@ -386,6 +315,9 @@ export function InstancesPage() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['whatsapp'] })
     },
+    onError: (err) => {
+      toast.error(getErrorMessage(err))
+    },
   })
 
   const deleteMutation = useMutation({
@@ -393,10 +325,11 @@ export function InstancesPage() {
       api.delete<void>(`/whatsapp/instance/${instanceId}`),
     onSuccess: () => {
       toast.success('Instância removida')
+      setConfirmDelete(null)
       void queryClient.invalidateQueries({ queryKey: ['whatsapp', 'instances'] })
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : 'Erro ao excluir')
+      toast.error(getErrorMessage(err))
     },
   })
 
@@ -459,7 +392,7 @@ export function InstancesPage() {
               instance={inst}
               onConnect={(id) => connectMutation.mutate(id)}
               onDisconnect={(id) => disconnectMutation.mutate(id)}
-              onDelete={(id) => deleteMutation.mutate(id)}
+              onDelete={(id) => setConfirmDelete(id)}
               isConnecting={connectMutation.isPending}
               isDeleting={deleteMutation.isPending}
             />
@@ -532,6 +465,17 @@ export function InstancesPage() {
       </Dialog>
 
       <CreateInstanceModal open={showCreate} onClose={() => setShowCreate(false)} />
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onOpenChange={(o) => { if (!o) setConfirmDelete(null) }}
+        title="Excluir instância"
+        description="Tem certeza que deseja excluir esta instância? Esta ação não pode ser desfeita."
+        variant="destructive"
+        confirmLabel="Excluir"
+        onConfirm={() => { if (confirmDelete) deleteMutation.mutate(confirmDelete) }}
+        loading={deleteMutation.isPending}
+      />
     </div>
   )
 }

@@ -11,6 +11,8 @@ import { useTheme } from '@/contexts/theme-context'
 import { useDashboardStats } from '@/hooks/use-dashboard-stats'
 import { formatRelativeTime } from '@/lib/utils'
 import { cn } from '@/lib/utils'
+import { ConnectionIndicator } from '@/components/shared/connection-indicator'
+import { OfflineBanner } from '@/components/shared/offline-banner'
 
 const SEEN_KEY = 'zc_notifications_seen_at'
 
@@ -112,6 +114,7 @@ export function DashboardLayout() {
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
+        <OfflineBanner />
         <header className="flex h-14 items-center justify-between border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           {/* Hamburger on mobile */}
           <Button
@@ -125,6 +128,7 @@ export function DashboardLayout() {
           </Button>
           <div className="hidden lg:block" />
           <div className="flex items-center gap-3">
+            <ConnectionIndicator />
             <Button
               variant="ghost"
               size="icon-sm"

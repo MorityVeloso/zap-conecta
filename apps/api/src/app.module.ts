@@ -18,6 +18,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { ScheduledMessagesModule } from './scheduled/scheduled-messages.module';
 import { QueueModule } from './queue/queue.module';
+import { RedisModule } from './common/redis/redis.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { QueueModule } from './queue/queue.module';
     }]),
     EventEmitterModule.forRoot({ wildcard: false, maxListeners: 20 }),
     QueueModule,
+    RedisModule,
     PrismaModule,
     TenantsModule,
     ApiKeysModule,

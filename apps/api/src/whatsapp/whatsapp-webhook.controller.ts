@@ -34,10 +34,12 @@ import {
   transformEvolutionMessage,
   transformEvolutionMessageStatus,
 } from './evolution-webhook.transformer';
+import { EvolutionWebhookSchema } from './dto/evolution-webhook.dto';
 import { WhatsAppService } from './whatsapp.service';
 import { EvolutionInstanceService } from './evolution-instance.service';
 import { WhatsAppReconnectService } from './whatsapp-reconnect.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../common/redis/redis.service';
 
 @ApiTags('WhatsApp Webhooks')
 @Controller('whatsapp')
@@ -51,6 +53,7 @@ export class WhatsAppWebhookController {
     private readonly eventEmitter: EventEmitter2,
     private readonly prisma: PrismaService,
     private readonly reconnectService: WhatsAppReconnectService,
+    private readonly redis: RedisService,
   ) {}
 
   @Post('webhook/receive/:tenantSlug')
@@ -115,6 +118,23 @@ export class WhatsAppWebhookController {
     tenantSlug: string,
     payload: Record<string, unknown>,
   ): Promise<void> {
+    // Validate top-level shape
+    const topLevel = EvolutionWebhookSchema.safeParse(payload);
+    if (!topLevel.success) {
+      this.logger.warn(`Invalid webhook shape from ${tenantSlug}: ${topLevel.error.message}`);
+      return;
+    }
+
+    // Validate apikey if present (webhook signature check)
+    const payloadApikey = typeof payload.apikey === 'string' ? payload.apikey : undefined;
+    if (payloadApikey) {
+      const valid = await this.validateWebhookApikey(tenantSlug, payloadApikey);
+      if (!valid) {
+        this.logger.warn(`Webhook apikey mismatch for tenant ${tenantSlug} — ignoring`);
+        return;
+      }
+    }
+
     const event = payload.event as string;
     this.logger.log(`Evolution webhook: event=${event} instance=${String(payload.instance)}`);
 
@@ -125,6 +145,18 @@ export class WhatsAppWebhookController {
           this.logger.warn(`Invalid messages.upsert payload: ${parsed.error.message}`);
           return;
         }
+
+        // Idempotency: skip duplicate messages (Redis key with 5min TTL)
+        const messageId = parsed.data.key?.id;
+        if (messageId) {
+          const idempotencyKey = `webhook:msg:${tenantSlug}:${messageId}`;
+          const isNew = await this.redis.setnx(idempotencyKey, '1', 300);
+          if (!isNew) {
+            this.logger.debug(`Duplicate message skipped: ${messageId}`);
+            return;
+          }
+        }
+
         // Resolve tenantId + instanceId so the event is emitted for persistence & webhook dispatch
         const instance = await this.evolutionInstanceService.findByTenant(tenantSlug);
         await this.whatsAppService.handleReceivedMessage(
@@ -258,24 +290,53 @@ export class WhatsAppWebhookController {
     }
   }
 
-  /** Fire-and-forget: resolve instance data and emit connection event */
+  /** Validate webhook apikey against the instanceToken stored in DB (cached in Redis) */
+  private async validateWebhookApikey(tenantSlug: string, apikey: string): Promise<boolean> {
+    const cacheKey = `webhook:token:${tenantSlug}`;
+
+    // Check Redis cache first
+    const cached = await this.redis.get(cacheKey);
+    if (cached) return cached === apikey;
+
+    const inst = await this.evolutionInstanceService.findByTenant(tenantSlug);
+    if (!inst?.instanceToken) return true; // No token stored — allow (backwards compat)
+
+    // Cache for 5min
+    await this.redis.setex(cacheKey, 300, inst.instanceToken);
+    return inst.instanceToken === apikey;
+  }
+
+  /** Fire-and-forget: resolve instance data and emit connection event (with 1 retry) */
   private emitConnectionEvent(tenantSlug: string, state: string, phone?: string): void {
-    this.prisma.whatsAppInstance.findFirst({
-      where: { tenantSlug },
-      select: { id: true, tenantId: true, instanceName: true },
-    }).then((inst) => {
-      if (!inst) return;
-      const event = state === 'open'
-        ? 'whatsapp.instance.connected'
-        : 'whatsapp.instance.disconnected';
-      this.eventEmitter.emit(event, {
-        tenantId: inst.tenantId,
-        tenantSlug,
-        instanceId: inst.id,
-        ...(phone ? { phone } : {}),
+    const doEmit = (): Promise<void> =>
+      this.prisma.whatsAppInstance.findFirst({
+        where: { tenantSlug },
+        select: { id: true, tenantId: true, instanceName: true },
+      }).then((inst) => {
+        if (!inst) return;
+        const event = state === 'open'
+          ? 'whatsapp.instance.connected'
+          : 'whatsapp.instance.disconnected';
+        this.eventEmitter.emit(event, {
+          tenantId: inst.tenantId,
+          tenantSlug,
+          instanceId: inst.id,
+          ...(phone ? { phone } : {}),
+        });
       });
-    }).catch((err) => {
-      this.logger.warn(`Failed to emit connection event: ${String(err)}`);
+
+    doEmit().catch((err) => {
+      this.logger.warn(`emitConnectionEvent failed, retrying in 1s: ${String(err)}`);
+      setTimeout(() => {
+        doEmit().catch((err2) => {
+          // Emit degraded event (no instanceId) to unblock listeners
+          this.logger.error(`emitConnectionEvent retry failed: ${String(err2)}`);
+          const event = state === 'open'
+            ? 'whatsapp.instance.connected'
+            : 'whatsapp.instance.disconnected';
+          this.eventEmitter.emit(event, { tenantId: '', tenantSlug, ...(phone ? { phone } : {}) });
+        });
+      }, 1_000);
     });
   }
 }

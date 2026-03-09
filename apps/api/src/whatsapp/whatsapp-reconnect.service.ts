@@ -1,26 +1,34 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { EvolutionInstanceService } from './evolution-instance.service';
+import { RedisService } from '../common/redis/redis.service';
 
 @Injectable()
 export class WhatsAppReconnectService {
   private readonly logger = new Logger(WhatsAppReconnectService.name);
   private static readonly MAX_ATTEMPTS = 3;
   private static readonly BACKOFF_MS = [10_000, 30_000, 60_000];
-
-  private readonly reconnectLock = new Set<string>();
+  private static readonly LOCK_TTL_SECONDS = 120; // 2min lock
 
   constructor(
     private readonly evolutionInstanceService: EvolutionInstanceService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly redis: RedisService,
   ) {}
 
   async handleDisconnect(tenantSlug: string, instanceName: string): Promise<void> {
-    if (this.reconnectLock.has(instanceName)) {
+    // Distributed lock — prevents duplicate reconnects across processes
+    const lockKey = `reconnect:lock:${instanceName}`;
+    const acquired = await this.redis.setnx(
+      lockKey,
+      '1',
+      WhatsAppReconnectService.LOCK_TTL_SECONDS,
+    );
+
+    if (!acquired) {
       this.logger.log(`Reconnect already in progress: ${instanceName}`);
       return;
     }
-    this.reconnectLock.add(instanceName);
 
     try {
       const instance = await this.evolutionInstanceService.findByTenant(tenantSlug);
@@ -42,8 +50,9 @@ export class WhatsAppReconnectService {
 
       await new Promise((r) => setTimeout(r, delay));
 
-      const newCount = await this.evolutionInstanceService.incrementReconnectAttempts(instanceName);
+      // Attempt restart FIRST, then increment counter only if we actually tried
       const success = await this.evolutionInstanceService.attemptRestart(instanceName);
+      const newCount = await this.evolutionInstanceService.incrementReconnectAttempts(instanceName);
 
       if (success) {
         this.logger.log(`${instanceName}: restart sent (attempt ${newCount})`);
@@ -51,7 +60,7 @@ export class WhatsAppReconnectService {
         this.logger.warn(`${instanceName}: restart failed (attempt ${newCount})`);
       }
     } finally {
-      this.reconnectLock.delete(instanceName);
+      await this.redis.del(lockKey);
     }
   }
 }
