@@ -115,10 +115,16 @@ export class WhatsAppOrphanCleanupService implements OnModuleInit {
   private async syncInstanceStates(
     evolutionStates: { name: string; state: string }[],
   ): Promise<void> {
+    // If Evolution API returned no instances, it likely failed — skip sync to avoid
+    // false-positive disconnects (fail-open: preserve current state when uncertain)
+    if (evolutionStates.length === 0) {
+      this.logger.debug('Health sync skipped — Evolution API returned no instances');
+      return;
+    }
+
     const now = Date.now();
     const stateByName = new Map(evolutionStates.map((i) => [i.name, i.state]));
 
-    // Fetch all instances that are either CONNECTED or DISCONNECTED
     const dbInstances = await this.prisma.whatsAppInstance.findMany({
       where: { status: { in: ['CONNECTED', 'DISCONNECTED'] } },
       select: {
@@ -135,9 +141,16 @@ export class WhatsAppOrphanCleanupService implements OnModuleInit {
     for (const inst of dbInstances) {
       const evolutionState = stateByName.get(inst.instanceName);
 
-      // ── DB=CONNECTED but Evolution=close → stale CONNECTED ──
-      if (inst.status === 'CONNECTED' && evolutionState !== 'open') {
-        this.logger.warn(`Health sync: ${inst.instanceName} DB=CONNECTED but Evolution=${evolutionState ?? 'unknown'} — syncing to DISCONNECTED`);
+      // If instance is not in the Evolution list, skip — don't assume disconnected.
+      // It may have been deleted or the list was partial.
+      if (evolutionState === undefined) {
+        this.logger.debug(`Health sync: ${inst.instanceName} not found in Evolution list — skipping`);
+        continue;
+      }
+
+      // ── DB=CONNECTED but Evolution=close → confirmed stale CONNECTED ──
+      if (inst.status === 'CONNECTED' && evolutionState === 'close') {
+        this.logger.warn(`Health sync: ${inst.instanceName} DB=CONNECTED but Evolution=close — syncing to DISCONNECTED`);
         await this.prisma.whatsAppInstance.updateMany({
           where: { instanceName: inst.instanceName },
           data: { status: 'DISCONNECTED' },
@@ -147,7 +160,6 @@ export class WhatsAppOrphanCleanupService implements OnModuleInit {
           tenantSlug: inst.tenantSlug,
           instanceId: inst.id,
         });
-        // Trigger reconnect
         this.reconnectService.handleDisconnect(inst.tenantSlug, inst.instanceName)
           .catch((err) => this.logger.warn(`Health reconnect failed for ${inst.instanceName}: ${String(err)}`));
         continue;
@@ -169,8 +181,7 @@ export class WhatsAppOrphanCleanupService implements OnModuleInit {
       }
 
       // ── DB=DISCONNECTED and Evolution=close → trigger reconnect ──
-      if (inst.status === 'DISCONNECTED' && evolutionState !== 'open') {
-        // Skip if recently attempted
+      if (inst.status === 'DISCONNECTED' && evolutionState === 'close') {
         if (inst.lastReconnectAt && now - inst.lastReconnectAt.getTime() < WhatsAppOrphanCleanupService.RECONNECT_COOLDOWN_MS) {
           continue;
         }

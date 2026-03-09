@@ -549,13 +549,14 @@ export class EvolutionInstanceService {
     { name: string; state: string }[]
   > {
     try {
+      // Evolution API v2 returns flat array: [{ name, connectionStatus, ... }]
       const instances = await this.makeRequest<
-        { instance: { instanceName: string; state: string; status: string } }[]
+        { name?: string; connectionStatus?: string; instance?: { instanceName?: string; state?: string } }[]
       >('/instance/fetchInstances', 'GET');
 
       return instances.map((i) => ({
-        name: i.instance?.instanceName ?? '',
-        state: i.instance?.state ?? i.instance?.status ?? 'unknown',
+        name: i.name ?? i.instance?.instanceName ?? '',
+        state: i.connectionStatus ?? i.instance?.state ?? 'unknown',
       }));
     } catch (error) {
       this.logger.error(`Failed to list instance states: ${String(error)}`);
