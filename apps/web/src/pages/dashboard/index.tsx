@@ -103,11 +103,6 @@ export function DashboardPage() {
             <CardTitle>Atividade recente</CardTitle>
             <CardDescription>Últimas mensagens recebidas e enviadas</CardDescription>
           </div>
-          <Link to="/dashboard/messages">
-            <Button variant="ghost" size="sm" className="text-primary">
-              Ver tudo
-            </Button>
-          </Link>
         </CardHeader>
         <CardContent>
           {isLoading ? (
