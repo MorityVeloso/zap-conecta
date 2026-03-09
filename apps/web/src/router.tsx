@@ -157,22 +157,6 @@ const webhooksRoute = createRoute({
   ),
 })
 
-const groupsRoute = createRoute({
-  getParentRoute: () => dashboardLayout,
-  path: '/groups',
-  component: React.lazy(() =>
-    import('@/pages/dashboard/groups').then((m) => ({ default: m.GroupsPage })),
-  ),
-})
-
-const scheduledRoute = createRoute({
-  getParentRoute: () => dashboardLayout,
-  path: '/scheduled',
-  component: React.lazy(() =>
-    import('@/pages/dashboard/scheduled').then((m) => ({ default: m.ScheduledPage })),
-  ),
-})
-
 // ─── Redirects ───────────────────────────────────────────────────────────
 
 const indexRoute = createRoute({
@@ -222,8 +206,6 @@ const routeTree = rootRoute.addChildren([
     apiKeysRoute,
     messagesRoute,
     webhooksRoute,
-    groupsRoute,
-    scheduledRoute,
     billingRoute,
     settingsRoute,
   ]),

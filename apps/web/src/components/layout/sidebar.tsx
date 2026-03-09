@@ -6,8 +6,6 @@ import {
   Key,
   MessageSquare,
   Webhook,
-  Users,
-  Clock,
   CreditCard,
   Settings,
   Zap,
@@ -34,8 +32,6 @@ const navItems: NavItem[] = [
   { label: 'API Keys', href: '/dashboard/api-keys', icon: Key },
   { label: 'Mensagens', href: '/dashboard/messages', icon: MessageSquare },
   { label: 'Webhooks', href: '/dashboard/webhooks', icon: Webhook },
-  { label: 'Grupos', href: '/dashboard/groups', icon: Users },
-  { label: 'Agendamentos', href: '/dashboard/scheduled', icon: Clock },
 ]
 
 const bottomItems: NavItem[] = [

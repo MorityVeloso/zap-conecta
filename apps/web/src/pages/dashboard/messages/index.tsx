@@ -1,15 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
-import { MessageSquare, Send, Download, Loader2, ArrowDownRight, ArrowUpRight, Image, FileText, Users, WifiOff, Plus, AlertCircle, RotateCcw } from 'lucide-react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { MessageSquare, Download, Loader2, ArrowDownRight, ArrowUpRight, Eye, Plus } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { getErrorMessage } from '@/lib/error-messages'
-import { useWhatsAppStatus } from '@/hooks/use-whatsapp-status'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { cn, formatRelativeTime, formatPhone } from '@/lib/utils'
 import { validatePhone } from '@/lib/phone-validation'
 
@@ -53,21 +50,8 @@ function exportConversationsCSV(conversations: ConversationSummary[]) {
 
 // ── Conversation thread ────────────────────────────────────────────────────
 
-type SendType = 'text' | 'image' | 'document'
-
 function ConversationThread({ phone }: { phone: string }) {
-  const queryClient = useQueryClient()
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [sendType, setSendType] = useState<SendType>('text')
-  const [text, setText] = useState('')
-  const [mediaUrl, setMediaUrl] = useState('')
-  const [caption, setCaption] = useState('')
-  const [fileName, setFileName] = useState('')
-
-  const { isConnected: whatsappConnected, isLoading: statusLoading } = useWhatsAppStatus()
-
-  // Only disable when we have a confirmed non-CONNECTED status (not while loading)
-  const isDisconnected = !statusLoading && !whatsappConnected
 
   const { data, isLoading } = useQuery({
     queryKey: ['messages', 'thread', phone],
@@ -84,80 +68,6 @@ function ConversationThread({ phone }: { phone: string }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages.length])
-
-  const sendMutation = useMutation({
-    mutationFn: async () => {
-      if (sendType === 'text') {
-        if (!text.trim()) return
-        await api.post('/whatsapp/send/text', { phone, message: text.trim() })
-      } else if (sendType === 'image') {
-        if (!mediaUrl) return
-        await api.post('/whatsapp/send/image', { phone, image: mediaUrl, caption: caption || undefined })
-      } else {
-        if (!mediaUrl || !fileName) return
-        await api.post('/whatsapp/send/document', { phone, document: mediaUrl, fileName, caption: caption || undefined })
-      }
-    },
-    onMutate: async () => {
-      // Optimistic update: show message immediately
-      await queryClient.cancelQueries({ queryKey: ['messages', 'thread', phone] })
-      const prev = queryClient.getQueryData<{ data: Message[] }>(['messages', 'thread', phone])
-      const optimisticMsg: Message = {
-        id: `optimistic-${Date.now()}`,
-        phone,
-        type: sendType,
-        direction: 'OUTBOUND',
-        content: {
-          text: sendType === 'text' ? text.trim() : undefined,
-          caption: caption || undefined,
-          url: mediaUrl || undefined,
-          fileName: fileName || undefined,
-        },
-        createdAt: new Date().toISOString(),
-        status: 'SENDING',
-      }
-      queryClient.setQueryData<{ data: Message[] }>(
-        ['messages', 'thread', phone],
-        (old) => ({ data: [...(old?.data ?? []), optimisticMsg] }),
-      )
-      // Clear inputs immediately for snappy UX
-      setText('')
-      setMediaUrl('')
-      setCaption('')
-      setFileName('')
-      return { prev }
-    },
-    onSuccess: () => {
-      // Immediately mark optimistic messages as sent (don't wait for refetch)
-      queryClient.setQueryData<{ data: Message[] }>(
-        ['messages', 'thread', phone],
-        (old) => ({
-          data: (old?.data ?? []).map((m) =>
-            m.status === 'SENDING' ? { ...m, status: 'SENT' } : m,
-          ),
-        }),
-      )
-      // Background refetch to sync with real server data
-      queryClient.invalidateQueries({ queryKey: ['messages', 'thread', phone] })
-    },
-    onError: (err: unknown) => {
-      // Mark optimistic messages as FAILED (don't rollback — keep them visible)
-      queryClient.setQueryData<{ data: Message[] }>(
-        ['messages', 'thread', phone],
-        (old) => ({
-          data: (old?.data ?? []).map((m) =>
-            m.status === 'SENDING' ? { ...m, status: 'FAILED' } : m,
-          ),
-        }),
-      )
-      toast.error(getErrorMessage(err))
-    },
-  })
-
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault()
-    sendMutation.mutate()
-  }
 
   return (
     <div className="flex flex-col h-full">
@@ -186,51 +96,29 @@ function ConversationThread({ phone }: { phone: string }) {
         ) : (
           messages.map((msg) => {
             const isOut = msg.direction === 'OUTBOUND'
-            const isSending = msg.status === 'SENDING'
-            const isFailed = msg.status === 'FAILED'
             const msgText = msg.content?.text ?? msg.content?.caption ?? `[${msg.type}]`
             return (
               <div key={msg.id} className={cn('flex gap-2 max-w-[80%]', isOut ? 'ml-auto flex-row-reverse' : '')}>
                 <div
                   className={cn(
                     'flex size-6 shrink-0 items-center justify-center rounded-full text-white text-[10px] mt-1',
-                    isFailed ? 'bg-red-500' : isOut ? 'bg-primary' : 'bg-emerald-500',
-                    isSending && 'opacity-60',
+                    isOut ? 'bg-primary' : 'bg-emerald-500',
                   )}
                   aria-hidden="true"
                 >
-                  {isSending ? <Loader2 className="size-3 animate-spin" />
-                    : isFailed ? <AlertCircle className="size-3" />
-                    : isOut ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
+                  {isOut ? <ArrowUpRight className="size-3" /> : <ArrowDownRight className="size-3" />}
                 </div>
                 <div
                   className={cn(
                     'rounded-2xl px-3 py-2 text-sm',
-                    isFailed
-                      ? 'bg-red-500/10 text-red-700 dark:text-red-400 rounded-tr-sm border border-red-200 dark:border-red-800'
-                      : isOut
-                        ? 'bg-primary text-primary-foreground rounded-tr-sm'
-                        : 'bg-muted text-foreground rounded-tl-sm',
-                    isSending && 'opacity-70',
+                    isOut
+                      ? 'bg-primary text-primary-foreground rounded-tr-sm'
+                      : 'bg-muted text-foreground rounded-tl-sm',
                   )}
                 >
                   <p>{msgText}</p>
-                  <div className={cn('flex items-center gap-1.5 text-[10px] mt-0.5', isOut && !isFailed ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
-                    {isSending && <span>Enviando...</span>}
-                    {isFailed && (
-                      <>
-                        <span className="text-red-500 font-medium">Falha no envio</span>
-                        <button
-                          type="button"
-                          onClick={() => sendMutation.mutate()}
-                          className="inline-flex items-center gap-0.5 text-red-500 hover:text-red-600 font-medium"
-                        >
-                          <RotateCcw className="size-2.5" />
-                          Tentar novamente
-                        </button>
-                      </>
-                    )}
-                    {!isSending && !isFailed && <span>{formatRelativeTime(msg.createdAt)}</span>}
+                  <div className={cn('text-[10px] mt-0.5', isOut ? 'text-primary-foreground/60' : 'text-muted-foreground')}>
+                    <span>{formatRelativeTime(msg.createdAt)}</span>
                   </div>
                 </div>
               </div>
@@ -239,105 +127,10 @@ function ConversationThread({ phone }: { phone: string }) {
         )}
       </div>
 
-      {/* Disconnected banner */}
-      {isDisconnected && (
-        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs">
-          <WifiOff className="w-3.5 h-3.5 shrink-0" />
-          <span>WhatsApp desconectado — <a href="/dashboard/instances" className="underline font-medium">reconecte na página de Instâncias</a></span>
-        </div>
-      )}
-
-      {/* Send form */}
-      <div className="border-t border-border bg-card p-3">
-        {/* Type tabs */}
-        <div className="flex gap-1 mb-2">
-          {(['text', 'image', 'document'] as SendType[]).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setSendType(t)}
-              className={cn(
-                'flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                sendType === t
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-muted',
-              )}
-            >
-              {t === 'text' && <MessageSquare className="size-3" />}
-              {t === 'image' && <Image className="size-3" />}
-              {t === 'document' && <FileText className="size-3" />}
-              {t === 'text' ? 'Texto' : t === 'image' ? 'Imagem' : 'Documento'}
-            </button>
-          ))}
-        </div>
-
-        <form onSubmit={handleSend} className="space-y-2">
-          {sendType === 'text' && (
-            <div className="flex gap-2">
-              <Input
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder={isDisconnected ? 'WhatsApp desconectado' : 'Digite uma mensagem…'}
-                disabled={isDisconnected}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault()
-                    sendMutation.mutate()
-                  }
-                }}
-              />
-              <Button type="submit" size="sm" disabled={!text.trim() || sendMutation.isPending || isDisconnected}>
-                <Send className="size-4" />
-              </Button>
-            </div>
-          )}
-          {(sendType === 'image' || sendType === 'document') && (
-            <>
-              <div>
-                <Label className="text-xs">URL da {sendType === 'image' ? 'imagem' : 'arquivo'}</Label>
-                <Input
-                  value={mediaUrl}
-                  onChange={(e) => setMediaUrl(e.target.value)}
-                  placeholder={sendType === 'image' ? 'https://…/imagem.jpg' : 'https://…/arquivo.pdf'}
-                  className="mt-1"
-                />
-              </div>
-              {sendType === 'document' && (
-                <div>
-                  <Label className="text-xs">Nome do arquivo</Label>
-                  <Input
-                    value={fileName}
-                    onChange={(e) => setFileName(e.target.value)}
-                    placeholder="documento.pdf"
-                    className="mt-1"
-                  />
-                </div>
-              )}
-              <div>
-                <Label className="text-xs">Legenda (opcional)</Label>
-                <div className="flex gap-2 mt-1">
-                  <Input
-                    value={caption}
-                    onChange={(e) => setCaption(e.target.value)}
-                    placeholder="Adicione uma legenda…"
-                  />
-                  <Button
-                    type="submit"
-                    size="sm"
-                    disabled={
-                      !mediaUrl ||
-                      (sendType === 'document' && !fileName) ||
-                      sendMutation.isPending ||
-                      isDisconnected
-                    }
-                  >
-                    <Send className="size-4" />
-                  </Button>
-                </div>
-              </div>
-            </>
-          )}
-        </form>
+      {/* Read-only info banner */}
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/50 border-t border-border text-muted-foreground text-xs">
+        <Eye className="w-3.5 h-3.5 shrink-0" />
+        <span>Visualização somente leitura — envie mensagens via <a href="/dashboard/api-keys" className="underline font-medium text-primary">API</a></span>
       </div>
     </div>
   )
@@ -359,87 +152,10 @@ function InitialsAvatar({ name }: { name: string }) {
   )
 }
 
-// ── Bulk send tracking ──────────────────────────────────────────────────────
-
-interface BulkBatchStatus {
-  id: string
-  total: number
-  sent: number
-  failed: number
-  status: 'PROCESSING' | 'COMPLETED' | 'FAILED'
-  progress: number
-  createdAt: string
-}
-
-function BulkSendTracker({ batchId, onDone }: { batchId: string; onDone: () => void }) {
-  const { data: batch } = useQuery({
-    queryKey: ['bulk-batch', batchId],
-    queryFn: () => api.get<BulkBatchStatus>(`/whatsapp/send/bulk/${batchId}`),
-    refetchInterval: (query) => {
-      const status = query.state.data?.status
-      return status === 'PROCESSING' ? 2000 : false
-    },
-  })
-
-  useEffect(() => {
-    // Only auto-dismiss on COMPLETED — keep FAILED visible for user review
-    if (batch?.status === 'COMPLETED') {
-      const timer = setTimeout(onDone, 5000)
-      return () => clearTimeout(timer)
-    }
-  }, [batch?.status, onDone])
-
-  if (!batch) return null
-
-  const isDone = batch.status !== 'PROCESSING'
-
-  return (
-    <div className="px-4 py-2.5 border-b border-border bg-muted/30">
-      <div className="flex items-center gap-2 mb-1.5">
-        <Users className="w-3.5 h-3.5 text-primary" />
-        <span className="text-xs font-medium text-foreground">
-          Envio em massa
-        </span>
-        <Badge
-          variant={batch.status === 'COMPLETED' ? 'success' : batch.status === 'FAILED' ? 'destructive' : 'default'}
-          className="text-[9px] ml-auto"
-        >
-          {batch.status === 'PROCESSING' ? `${batch.progress}%` : batch.status === 'COMPLETED' ? 'Concluído' : 'Falhou'}
-        </Badge>
-        {isDone && (
-          <button
-            type="button"
-            onClick={onDone}
-            className="text-muted-foreground hover:text-foreground text-xs ml-1"
-            aria-label="Fechar"
-          >
-            ✕
-          </button>
-        )}
-      </div>
-      <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
-        <div
-          className={cn(
-            'h-full rounded-full transition-all duration-500',
-            isDone && batch.failed === batch.total ? 'bg-destructive' : 'bg-primary',
-          )}
-          style={{ width: `${batch.progress}%` }}
-        />
-      </div>
-      <p className="text-[10px] text-muted-foreground mt-1">
-        {batch.sent} enviados · {batch.failed} falharam · {batch.total} total
-      </p>
-    </div>
-  )
-}
-
 export function MessagesPage() {
   const [selectedPhone, setSelectedPhone] = useState<string | null>(null)
-  const [activeBatchIds, setActiveBatchIds] = useState<string[]>([])
   const [newConvPhone, setNewConvPhone] = useState('')
   const [showNewConv, setShowNewConv] = useState(false)
-
-  const removeBatch = (id: string) => setActiveBatchIds((prev) => prev.filter((b) => b !== id))
 
   const { data: conversations = [], isLoading } = useQuery({
     queryKey: ['messages', 'conversations'],
@@ -503,11 +219,6 @@ export function MessagesPage() {
           </form>
         )}
 
-        {/* Active bulk sends */}
-        {activeBatchIds.map((id) => (
-          <BulkSendTracker key={id} batchId={id} onDone={() => removeBatch(id)} />
-        ))}
-
         <div className="flex-1 overflow-y-auto">
           {isLoading ? (
             <div className="flex justify-center py-12">
@@ -517,7 +228,7 @@ export function MessagesPage() {
             <div className="flex flex-col items-center text-center px-6 py-12 gap-2">
               <MessageSquare className="w-8 h-8 text-muted-foreground/30" />
               <p className="text-sm font-medium">Nenhuma conversa ainda</p>
-              <p className="text-xs text-muted-foreground">As conversas aparecem aqui após enviar ou receber mensagens</p>
+              <p className="text-xs text-muted-foreground">As conversas aparecem aqui conforme mensagens são enviadas e recebidas via API</p>
             </div>
           ) : (
             conversations.map((conv) => (
@@ -566,7 +277,7 @@ export function MessagesPage() {
               <MessageSquare className="w-10 h-10 text-muted-foreground/30" />
               <p className="font-medium text-foreground">Selecione uma conversa</p>
               <p className="text-sm text-muted-foreground max-w-xs">
-                Escolha uma conversa na lista para visualizar as mensagens e enviar respostas
+                Escolha uma conversa na lista para visualizar as mensagens trocadas via API
               </p>
             </Card>
           </div>
